@@ -6,22 +6,26 @@ Suggested registry metadata:
 
 ```json
 {
-  "app_id": "pbb-games",
+  "id": "pbb-games",
   "name": "PBB Games Corner",
-  "category": "citizen",
+  "display_name": "Games",
+  "version": "0.1.0",
+  "enabled": true,
+  "install_scope": "local",
+  "local_url": "https://games.pbb.ph",
   "launch_url": "https://games.pbb.ph",
   "health_url": "https://games.pbb.ph/health.php",
-  "description": "Local games and emergency-preparedness learning activities",
-  "emergency_priority": "low",
-  "disable_during_emergency": true,
-  "ui_theme": "dark",
-  "uses_helper_ui": true,
+  "audience": ["citizen"],
   "launcher": {
     "visible": true,
-    "sort": 40,
-    "icon": "data.grid",
+    "sort": 50,
+    "icon": "media.gamepad",
     "logo_url": "https://games.pbb.ph/assets/launcher/app-icon.png",
     "logo_kind": "mark"
+  },
+  "public_gateway": {
+    "enabled": false,
+    "reason": "PBB Games Corner is local LAN only and is not exposed through public Landing gateway routes."
   }
 }
 ```
