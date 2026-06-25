@@ -606,21 +606,84 @@ export async function mountGame(session, options = {}) {
         const state = player.getState();
         const center = worldToScreen(layout, state.x, state.y);
         const radius = layout.cellSize * 0.36;
-        const open = 0.22 + Math.abs(Math.sin(pulseTime * 10)) * 0.18;
         const direction = state.movingDirection || state.direction || "right";
-        const angle = directionAngle(direction);
+        const vector = DIRECTIONS[direction] || DIRECTIONS.right;
+        const bob = Math.sin(pulseTime * 12) * layout.cellSize * 0.025;
+        const bodyWidth = radius * 1.55;
+        const bodyHeight = radius * 1.42;
+        const bodyX = center.x - bodyWidth / 2;
+        const bodyY = center.y - bodyHeight * 0.48 + bob;
+        const glowColor = powerTimer > 0 ? "#ffd166" : "#79d7ff";
 
         ctx.save();
-        ctx.fillStyle = powerTimer > 0 ? "#ffd166" : "#79d7ff";
+        ctx.shadowColor = glowColor;
+        ctx.shadowBlur = powerTimer > 0 ? radius * 0.7 : radius * 0.35;
+        ctx.fillStyle = powerTimer > 0 ? "rgba(255, 209, 102, .18)" : "rgba(121, 215, 255, .14)";
         ctx.beginPath();
-        ctx.moveTo(center.x, center.y);
-        ctx.arc(center.x, center.y, radius, angle + open, angle + Math.PI * 2 - open);
-        ctx.closePath();
+        ctx.arc(center.x, center.y + bob, radius * 1.18, 0, Math.PI * 2);
         ctx.fill();
-        ctx.fillStyle = "#06101d";
+
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = "rgba(0, 0, 0, .28)";
         ctx.beginPath();
-        ctx.arc(center.x + Math.cos(angle - Math.PI / 2) * radius * 0.28, center.y + Math.sin(angle - Math.PI / 2) * radius * 0.28, Math.max(1.8, radius * 0.12), 0, Math.PI * 2);
+        ctx.ellipse(center.x, center.y + radius * 0.66, radius * 0.64, radius * 0.18, 0, 0, Math.PI * 2);
         ctx.fill();
+
+        ctx.fillStyle = "#177bd8";
+        roundRect(bodyX, bodyY, bodyWidth, bodyHeight, Math.max(3, radius * 0.28));
+        ctx.fill();
+        ctx.fillStyle = "rgba(160, 225, 255, .28)";
+        roundRect(bodyX + bodyWidth * 0.12, bodyY + bodyHeight * 0.08, bodyWidth * 0.76, bodyHeight * 0.2, Math.max(2, radius * 0.16));
+        ctx.fill();
+
+        ctx.fillStyle = "#0a1628";
+        roundRect(
+            bodyX + bodyWidth * 0.2,
+            bodyY + bodyHeight * 0.3,
+            bodyWidth * 0.6,
+            bodyHeight * 0.42,
+            Math.max(3, radius * 0.18),
+        );
+        ctx.fill();
+
+        const eyeOffset = vector.column * radius * 0.07;
+        ctx.fillStyle = powerTimer > 0 ? "#fff1a8" : "#8cf2ff";
+        [-0.18, 0.18].forEach((offset) => {
+            ctx.beginPath();
+            ctx.ellipse(
+                center.x + bodyWidth * offset + eyeOffset,
+                bodyY + bodyHeight * 0.51,
+                Math.max(1.8, radius * 0.1),
+                Math.max(2.2, radius * 0.18),
+                0,
+                0,
+                Math.PI * 2,
+            );
+            ctx.fill();
+        });
+
+        ctx.fillStyle = "#42c7ff";
+        ctx.beginPath();
+        ctx.arc(center.x, bodyY - radius * 0.02, Math.max(2, radius * 0.16), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = powerTimer > 0 ? "#ffd166" : "#b9f7ff";
+        ctx.beginPath();
+        ctx.arc(center.x, bodyY - radius * 0.06, Math.max(1.5, radius * 0.09), 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = "#125fa8";
+        [-0.55, 0.55].forEach((offset) => {
+            ctx.beginPath();
+            ctx.arc(center.x + bodyWidth * offset, center.y + radius * 0.24 + bob, Math.max(2, radius * 0.2), 0, Math.PI * 2);
+            ctx.fill();
+        });
+
+        ctx.fillStyle = "#58b9ff";
+        [-0.24, 0.24].forEach((offset) => {
+            ctx.beginPath();
+            ctx.arc(center.x + bodyWidth * offset, center.y + radius * 0.7 + bob, Math.max(1.8, radius * 0.16), 0, Math.PI * 2);
+            ctx.fill();
+        });
         ctx.restore();
     }
 
@@ -629,55 +692,138 @@ export async function mountGame(session, options = {}) {
         const center = worldToScreen(layout, state.x, state.y);
         const radius = layout.cellSize * 0.34;
         if (patrol.mode === "returning") {
-            drawReturningPatrolEyes(center, radius, state);
+            drawReturningPatrolDrone(center, radius, state);
             return;
         }
-        ctx.save();
-        ctx.fillStyle = powerTimer > 0 && patrol.mode === "frightened"
+        const direction = state.movingDirection || state.direction || "right";
+        const vector = DIRECTIONS[direction] || DIRECTIONS.right;
+        const color = powerTimer > 0 && patrol.mode === "frightened"
             ? "#8db5ff"
             : PATROL_COLORS[patrol.index % PATROL_COLORS.length];
-        ctx.globalAlpha = patrol.mode === "reviving"
+        const alpha = patrol.mode === "reviving"
             ? 0.42 + Math.sin(pulseTime * 14) * 0.14
             : powerTimer > 0 && patrol.mode === "frightened"
                 ? 0.78
                 : 0.95;
+        const beamLength = radius * 1.35;
+        const beamWidth = radius * 0.62;
+
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = powerTimer > 0 && patrol.mode === "frightened"
+            ? "rgba(141, 181, 255, .14)"
+            : "rgba(255, 77, 109, .13)";
         ctx.beginPath();
-        ctx.arc(center.x, center.y, radius, Math.PI, 0);
-        ctx.lineTo(center.x + radius, center.y + radius * 0.55);
-        for (let i = 2; i >= -2; i -= 1) {
-            ctx.lineTo(center.x + i * radius * 0.24, center.y + radius * (i % 2 === 0 ? 0.32 : 0.58));
-        }
+        ctx.moveTo(center.x, center.y);
+        ctx.lineTo(
+            center.x + vector.column * beamLength - Math.abs(vector.row) * beamWidth,
+            center.y + vector.row * beamLength - Math.abs(vector.column) * beamWidth,
+        );
+        ctx.lineTo(
+            center.x + vector.column * beamLength + Math.abs(vector.row) * beamWidth,
+            center.y + vector.row * beamLength + Math.abs(vector.column) * beamWidth,
+        );
         ctx.closePath();
         ctx.fill();
-        ctx.fillStyle = "#06101d";
+
+        ctx.fillStyle = "rgba(0, 0, 0, .3)";
         ctx.beginPath();
-        ctx.arc(center.x - radius * 0.28, center.y - radius * 0.14, Math.max(1.5, radius * 0.12), 0, Math.PI * 2);
-        ctx.arc(center.x + radius * 0.28, center.y - radius * 0.14, Math.max(1.5, radius * 0.12), 0, Math.PI * 2);
+        ctx.ellipse(center.x, center.y + radius * 0.7, radius * 0.72, radius * 0.16, 0, 0, Math.PI * 2);
         ctx.fill();
+
+        ctx.shadowColor = color;
+        ctx.shadowBlur = radius * 0.55;
+        ctx.fillStyle = "#172136";
+        ctx.beginPath();
+        ctx.ellipse(center.x, center.y, radius * 0.92, radius * 0.58, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = Math.max(1.3, radius * 0.14);
+        ctx.beginPath();
+        ctx.ellipse(center.x, center.y - radius * 0.03, radius * 0.68, radius * 0.38, 0, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.fillStyle = "#233752";
+        ctx.beginPath();
+        ctx.arc(center.x, center.y - radius * 0.18, radius * 0.36, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = powerTimer > 0 && patrol.mode === "frightened" ? "#d9e7ff" : "#ff4d6d";
+        [-0.62, 0, 0.62].forEach((offset, index) => {
+            const blink = 0.76 + Math.sin(pulseTime * 10 + patrol.index + index) * 0.18;
+            ctx.globalAlpha = alpha * blink;
+            ctx.beginPath();
+            ctx.arc(center.x + radius * offset, center.y + radius * 0.08, Math.max(1.4, radius * 0.12), 0, Math.PI * 2);
+            ctx.fill();
+        });
+        ctx.globalAlpha = alpha;
+
+        ctx.strokeStyle = "rgba(120, 200, 255, .44)";
+        ctx.lineWidth = Math.max(1, radius * 0.08);
+        [-0.88, 0.88].forEach((offset) => {
+            const rotorX = center.x + radius * offset;
+            ctx.beginPath();
+            ctx.arc(rotorX, center.y - radius * 0.03, radius * 0.24, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(rotorX - radius * 0.22, center.y - radius * 0.03);
+            ctx.lineTo(rotorX + radius * 0.22, center.y - radius * 0.03);
+            ctx.moveTo(rotorX, center.y - radius * 0.25);
+            ctx.lineTo(rotorX, center.y + radius * 0.19);
+            ctx.stroke();
+        });
+
+        ctx.fillStyle = "#9bdcff";
+        ctx.beginPath();
+        ctx.arc(center.x + vector.column * radius * 0.22, center.y + vector.row * radius * 0.16, Math.max(1.5, radius * 0.12), 0, Math.PI * 2);
+        ctx.fill();
+
         ctx.restore();
     }
 
-    function drawReturningPatrolEyes(center, radius, state) {
+    function drawReturningPatrolDrone(center, radius, state) {
         const direction = state.movingDirection || state.direction || "right";
         const vector = DIRECTIONS[direction] || DIRECTIONS.right;
-        const eyeRadius = Math.max(2, radius * 0.28);
-        const pupilRadius = Math.max(1, radius * 0.11);
-        const pupilOffsetX = vector.column * radius * 0.12;
-        const pupilOffsetY = vector.row * radius * 0.12;
+        const coreRadius = radius * 0.64;
+        const pulse = 0.78 + Math.sin(pulseTime * 10) * 0.08;
 
         ctx.save();
-        ctx.globalAlpha = 0.94;
-        [-0.3, 0.3].forEach((offset) => {
-            const x = center.x + radius * offset;
-            const y = center.y - radius * 0.03;
-            ctx.fillStyle = "#f8fbff";
+        ctx.globalAlpha = 0.58;
+        ctx.shadowColor = "rgba(140, 242, 255, .46)";
+        ctx.shadowBlur = radius * 0.18;
+        ctx.fillStyle = "rgba(178, 205, 220, .72)";
+        ctx.beginPath();
+        ctx.ellipse(center.x, center.y, coreRadius * 0.58, coreRadius * 0.34, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = "rgba(64, 116, 166, .76)";
+        ctx.lineWidth = Math.max(1, radius * 0.055);
+        ctx.beginPath();
+        ctx.ellipse(center.x, center.y, coreRadius * 0.36, coreRadius * 0.2, 0, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.fillStyle = "rgba(43, 84, 140, .82)";
+        [-0.3, 0.3].forEach((offset, index) => {
             ctx.beginPath();
-            ctx.arc(x, y, eyeRadius, 0, Math.PI * 2);
+            ctx.arc(
+                center.x + coreRadius * offset + vector.column * coreRadius * 0.07,
+                center.y - coreRadius * 0.03 + vector.row * coreRadius * 0.07,
+                Math.max(1, coreRadius * (index === 0 ? 0.08 : 0.1)) * pulse,
+                0,
+                Math.PI * 2,
+            );
             ctx.fill();
-            ctx.fillStyle = "#1b4fd7";
+        });
+
+        ctx.strokeStyle = "rgba(104, 150, 180, .42)";
+        ctx.lineWidth = Math.max(1, radius * 0.04);
+        [-0.72, 0.72].forEach((offset) => {
             ctx.beginPath();
-            ctx.arc(x + pupilOffsetX, y + pupilOffsetY, pupilRadius, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.arc(center.x + coreRadius * offset, center.y, coreRadius * 0.12, 0, Math.PI * 2);
+            ctx.stroke();
         });
         ctx.restore();
     }
@@ -762,15 +908,6 @@ function directionBetween(from, to) {
     const rowDelta = to.row - from.row;
     const columnDelta = to.column - from.column;
     return Object.entries(DIRECTIONS).find(([, vector]) => vector.row === rowDelta && vector.column === columnDelta)?.[0] || "";
-}
-
-function directionAngle(direction) {
-    return {
-        right: 0,
-        down: Math.PI / 2,
-        left: Math.PI,
-        up: -Math.PI / 2,
-    }[direction] ?? 0;
 }
 
 function clamp(value, min, max) {
