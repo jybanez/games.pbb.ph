@@ -4,5 +4,8 @@ pbb-chat-token.local.json
 output/
 node_modules/
 .playwright-cli/
+.codex/*
+!.codex/skills/
+!.codex/skills/**
 .DS_Store
 Thumbs.db
