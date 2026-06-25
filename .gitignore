@@ -1,0 +1,8 @@
+pbb-chat-token.local.json
+*.log
+*.tmp
+output/
+node_modules/
+.playwright-cli/
+.DS_Store
+Thumbs.db

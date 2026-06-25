@@ -1,0 +1,19 @@
+{
+  "app_id": "pbb-games",
+  "name": "PBB Games Corner",
+  "short_name": "PBB Games",
+  "description": "Local games and emergency-preparedness learning activities for citizens connected to the PBB local network.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "landscape",
+  "theme_color": "#0d1523",
+  "background_color": "#020617",
+  "icons": [
+    {
+      "src": "/assets/launcher/app-icon.png",
+      "sizes": "1254x1254",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
