@@ -443,7 +443,7 @@ export async function mountGame(session, options = {}) {
     }
 
     function syncScore() {
-        ui.score.textContent = `Score ${score}  Lines ${lines}  Lv ${level}`;
+        ui.score.textContent = `Score ${score}`;
     }
 
     function endGame() {
@@ -493,7 +493,7 @@ export async function mountGame(session, options = {}) {
         drawBoard(layout);
         drawGhost(layout);
         drawPiece(layout);
-        drawNext(layout);
+        drawSidePanel(layout);
         drawClearAnimation(layout);
         drawVisualEffects(layout);
     }
@@ -502,16 +502,19 @@ export async function mountGame(session, options = {}) {
         const width = Math.max(240, layer.canvas.width || session.viewport.clientWidth || 360);
         const height = Math.max(320, layer.canvas.height || session.viewport.clientHeight || 640);
         const portrait = height >= width;
-        const topReserve = portrait ? clamp(height * 0.075, 48, 72) : 48;
+        const topReserve = portrait ? clamp(height * 0.1, 58, 92) : clamp(height * 0.08, 56, 76);
         const bottomReserve = portrait ? clamp(height * 0.18, 120, 164) : 88;
-        const sidePanelWidth = !portrait && width >= 700 ? clamp(width * 0.17, 116, 160) : 0;
-        const sideMargin = clamp(width * 0.045, 12, 42);
-        const availableWidth = Math.max(120, width - sideMargin * 2 - sidePanelWidth);
+        const sideMargin = clamp(width * 0.035, 10, 32);
+        const panelGap = clamp(width * 0.025, 8, 22);
+        const sidePanelWidth = clamp(width * (portrait ? 0.18 : 0.16), portrait ? 66 : 110, portrait ? 86 : 168);
+        const availableWidth = Math.max(120, width - sideMargin * 2 - panelGap - sidePanelWidth);
         const availableHeight = Math.max(180, height - topReserve - bottomReserve);
         const cellSize = Math.floor(Math.max(10, Math.min(availableWidth / columns, availableHeight / visibleRows)));
         const boardWidth = cellSize * columns;
         const boardHeight = cellSize * visibleRows;
-        const boardX = Math.round((width - sidePanelWidth - boardWidth) / 2);
+        const groupWidth = boardWidth + panelGap + sidePanelWidth;
+        const boardX = Math.round((width - groupWidth) / 2);
+        const railX = Math.round(boardX + boardWidth + panelGap);
         const boardY = Math.round(topReserve + (availableHeight - boardHeight) / 2);
 
         return {
@@ -523,6 +526,9 @@ export async function mountGame(session, options = {}) {
             boardWidth,
             boardHeight,
             sidePanelWidth,
+            panelGap,
+            railX,
+            railY: boardY,
             portrait,
         };
     }
@@ -624,33 +630,77 @@ export async function mountGame(session, options = {}) {
         ctx.restore();
     }
 
-    function drawNext(layout) {
-        if (!queue.length) {
-            return;
-        }
-        const canUseSidePanel = layout.sidePanelWidth > 0;
-        const panelX = canUseSidePanel
-            ? layout.boardX + layout.boardWidth + 24
-            : layout.boardX + layout.boardWidth - layout.cellSize * 2.7;
-        const panelY = canUseSidePanel
-            ? layout.boardY + layout.cellSize
-            : layout.boardY + layout.cellSize * 0.6;
-        const previewSize = Math.max(8, Math.floor(layout.cellSize * (canUseSidePanel ? 0.62 : 0.44)));
+    function drawSidePanel(layout) {
+        const panelX = layout.railX;
+        const panelY = layout.boardY;
+        const panelWidth = layout.sidePanelWidth;
+        const previewSize = Math.max(8, Math.floor(Math.min(layout.cellSize * 0.72, (panelWidth - 18) / 4)));
+        const panelPadding = layout.portrait ? 7 : 12;
+        const labelSize = layout.portrait ? 10 : 12;
+        const valueSize = layout.portrait ? 15 : 19;
+        const sectionGap = layout.portrait ? 12 : 18;
+        const previewBoxHeight = Math.max(previewSize * 4.5 + 24, layout.portrait ? 72 : 100);
+        const statsY = panelY + previewBoxHeight + sectionGap;
 
         ctx.save();
-        ctx.globalAlpha = canUseSidePanel ? 1 : 0.86;
-        ctx.fillStyle = "rgba(7, 16, 29, .68)";
+        drawPanelBox(panelX, panelY, panelWidth, previewBoxHeight);
+        drawPanelLabel("Next", panelX + panelPadding, panelY + panelPadding + labelSize / 2, labelSize);
+        if (queue.length) {
+            const shapeX = panelX + (panelWidth - previewSize * 4) / 2;
+            const shapeY = panelY + panelPadding + labelSize + 12;
+            drawMiniShape(queue[0], shapeX, shapeY, previewSize);
+        }
+
+        drawStatBlock({
+            x: panelX,
+            y: statsY,
+            width: panelWidth,
+            label: "Lines",
+            value: lines,
+            labelSize,
+            valueSize,
+            padding: panelPadding,
+        });
+        drawStatBlock({
+            x: panelX,
+            y: statsY + (layout.portrait ? 48 : 60),
+            width: panelWidth,
+            label: "Level",
+            value: level,
+            labelSize,
+            valueSize,
+            padding: panelPadding,
+        });
+        ctx.restore();
+    }
+
+    function drawPanelBox(x, y, width, height) {
+        ctx.fillStyle = "rgba(7, 16, 29, .64)";
         ctx.strokeStyle = "rgba(126, 155, 205, .22)";
         ctx.lineWidth = 1;
-        ctx.fillRect(panelX - 10, panelY - 24, previewSize * 4.6, previewSize * 4.9);
-        ctx.strokeRect(panelX - 10, panelY - 24, previewSize * 4.6, previewSize * 4.9);
+        ctx.fillRect(x, y, width, height);
+        ctx.strokeRect(x, y, width, height);
+    }
+
+    function drawPanelLabel(text, x, y, fontSize) {
         ctx.fillStyle = "#b2c2e5";
-        ctx.font = `700 ${Math.max(10, Math.floor(previewSize * 0.58))}px Segoe UI, sans-serif`;
+        ctx.font = `800 ${fontSize}px Segoe UI, sans-serif`;
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
-        ctx.fillText("Next", panelX, panelY - 10);
-        drawMiniShape(queue[0], panelX, panelY + previewSize * 0.7, previewSize);
-        ctx.restore();
+        ctx.fillText(text, x, y);
+    }
+
+    function drawStatBlock({ x, y, width, label, value, labelSize, valueSize, padding }) {
+        const height = Math.max(42, valueSize + labelSize + padding * 2);
+        drawPanelBox(x, y, width, height);
+        ctx.fillStyle = "#8fa2c5";
+        ctx.font = `800 ${labelSize}px Segoe UI, sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(label, x + width / 2, y + padding + labelSize / 2);
+        ctx.fillStyle = "#eaf2ff";
+        ctx.font = `900 ${valueSize}px Segoe UI, sans-serif`;
+        ctx.fillText(String(value), x + width / 2, y + height - padding - valueSize / 2);
     }
 
     function drawMiniShape(shape, x, y, size) {
