@@ -448,7 +448,7 @@ export async function mountGame(session, options = {}) {
     function endGame() {
         done = true;
         running = false;
-        options.onStateChange?.("gameOver", { detail: `Score ${score} | Lines ${lines}` });
+        options.onStateChange?.("gameOver");
         draw();
     }
 
@@ -690,17 +690,19 @@ export async function mountGame(session, options = {}) {
     }
 
     function drawStatBlock({ x, y, width, label, value, labelSize, valueSize, padding }) {
-        const height = Math.max(42, valueSize + labelSize + padding * 2);
+        const labelValueGap = Math.max(5, Math.floor(padding * 0.75));
+        const height = Math.max(46, valueSize + labelSize + padding * 2 + labelValueGap);
         drawPanelBox(x, y, width, height);
         ctx.fillStyle = "#8fa2c5";
         ctx.font = `800 ${labelSize}px Segoe UI, sans-serif`;
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
-        ctx.fillText(label, x + padding, y + padding + labelSize / 2);
+        const labelY = y + padding + labelSize / 2;
+        ctx.fillText(label, x + padding, labelY);
         ctx.fillStyle = "#eaf2ff";
         ctx.font = `900 ${valueSize}px Segoe UI, sans-serif`;
         ctx.textAlign = "center";
-        ctx.fillText(String(value), x + width / 2, y + height - padding - valueSize / 2);
+        ctx.fillText(String(value), x + width / 2, labelY + labelSize / 2 + labelValueGap + valueSize / 2);
     }
 
     function drawMiniShape(shape, x, y, size) {
