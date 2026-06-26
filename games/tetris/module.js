@@ -5,6 +5,9 @@ export async function mountGame(session, options = {}) {
     const ctx = layer.context;
     const ui = createShell(session, options.game || { title: "Tetris" });
     const sound = options.sound;
+    const showMilestone = typeof options.showMilestone === "function"
+        ? options.showMilestone
+        : () => undefined;
 
     const columns = 10;
     const visibleRows = 20;
@@ -260,8 +263,9 @@ export async function mountGame(session, options = {}) {
         });
         const cleared = clearLines();
         if (cleared > 0) {
-            applyLineScore(cleared);
+            const scoreResult = applyLineScore(cleared);
             sound?.play?.("score");
+            showLineMilestone(cleared, scoreResult);
         }
         if (cells.some((cell) => cell.row < hiddenRows)) {
             endGame();
@@ -288,9 +292,51 @@ export async function mountGame(session, options = {}) {
 
     function applyLineScore(cleared) {
         const lineScores = [0, 100, 300, 500, 800];
+        const previousLevel = level;
         lines += cleared;
         level = Math.floor(lines / 10) + 1;
-        score += (lineScores[cleared] || 0) * level;
+        const award = (lineScores[cleared] || 0) * level;
+        score += award;
+        return {
+            award,
+            previousLevel,
+            nextLevel: level,
+        };
+    }
+
+    function showLineMilestone(cleared, scoreResult) {
+        if (done || paused) {
+            return;
+        }
+        const leveledUp = scoreResult.nextLevel > scoreResult.previousLevel;
+        if (leveledUp) {
+            showMilestone({
+                title: `Level ${scoreResult.nextLevel}`,
+                detail: `${lines} lines cleared. Speed increased.`,
+                tone: "success",
+                position: "top-center",
+                duration: 1300,
+                autoDismiss: true,
+                actions: [],
+            });
+            return;
+        }
+
+        const title = cleared === 4
+            ? "Tetris!"
+            : cleared === 1
+                ? "Line Clear"
+                : `${cleared} Lines`;
+
+        showMilestone({
+            title,
+            detail: `+${scoreResult.award} points`,
+            tone: cleared >= 4 ? "success" : "info",
+            position: "top-center",
+            duration: cleared >= 4 ? 1200 : 900,
+            autoDismiss: true,
+            actions: [],
+        });
     }
 
     function canPlace(cells) {

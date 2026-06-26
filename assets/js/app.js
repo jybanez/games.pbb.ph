@@ -323,6 +323,12 @@ async function launchGame(game) {
             onStateChange(nextPhase, stateDetail) {
                 handleGameModuleState(session, nextPhase, stateDetail);
             },
+            showMilestone(milestoneOptions) {
+                if (activeGame?.session !== session) {
+                    return undefined;
+                }
+                return activeGame.stateChrome?.showMilestone?.(milestoneOptions);
+            },
             requestPause() {
                 if (activeGame?.session === session) {
                     pauseActiveGame();
