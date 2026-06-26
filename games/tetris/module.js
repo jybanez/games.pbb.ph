@@ -5,9 +5,6 @@ export async function mountGame(session, options = {}) {
     const ctx = layer.context;
     const ui = createShell(session, options.game || { title: "Tetris" });
     const sound = options.sound;
-    const showMilestone = typeof options.showMilestone === "function"
-        ? options.showMilestone
-        : () => undefined;
 
     const columns = 10;
     const visibleRows = 20;
@@ -349,15 +346,7 @@ export async function mountGame(session, options = {}) {
         }
         const leveledUp = scoreResult.nextLevel > scoreResult.previousLevel;
         if (leveledUp) {
-            showMilestone({
-                title: `Level ${scoreResult.nextLevel}`,
-                detail: `${lines} lines cleared. Speed increased.`,
-                tone: "success",
-                position: "top-center",
-                duration: 1300,
-                autoDismiss: true,
-                actions: [],
-            });
+            startLevelUpEffect(scoreResult.nextLevel);
             return;
         }
 
@@ -407,6 +396,16 @@ export async function mountGame(session, options = {}) {
             color,
             age: -blinkDuration * 0.8,
             duration: 0.92,
+        });
+    }
+
+    function startLevelUpEffect(nextLevel) {
+        visualEffects.push({
+            type: "levelUp",
+            level: nextLevel,
+            color: "#ffd166",
+            age: -0.08,
+            duration: 1.55,
         });
     }
 
@@ -695,11 +694,12 @@ export async function mountGame(session, options = {}) {
         drawPanelBox(x, y, width, height);
         ctx.fillStyle = "#8fa2c5";
         ctx.font = `800 ${labelSize}px Segoe UI, sans-serif`;
-        ctx.textAlign = "center";
+        ctx.textAlign = "left";
         ctx.textBaseline = "middle";
-        ctx.fillText(label, x + width / 2, y + padding + labelSize / 2);
+        ctx.fillText(label, x + padding, y + padding + labelSize / 2);
         ctx.fillStyle = "#eaf2ff";
         ctx.font = `900 ${valueSize}px Segoe UI, sans-serif`;
+        ctx.textAlign = "center";
         ctx.fillText(String(value), x + width / 2, y + height - padding - valueSize / 2);
     }
 
@@ -794,6 +794,9 @@ export async function mountGame(session, options = {}) {
             if (effect.type === "floatingText") {
                 drawFloatingText(layout, effect);
             }
+            if (effect.type === "levelUp") {
+                drawLevelUpEffect(layout, effect);
+            }
         });
         ctx.restore();
     }
@@ -834,6 +837,63 @@ export async function mountGame(session, options = {}) {
         ctx.textBaseline = "middle";
         ctx.strokeText(effect.text, x, y);
         ctx.fillText(effect.text, x, y);
+        ctx.restore();
+    }
+
+    function drawLevelUpEffect(layout, effect) {
+        const progress = clamp(effect.age / effect.duration, 0, 1);
+        const intro = clamp(progress / 0.18, 0, 1);
+        const fade = progress > 0.78 ? 1 - clamp((progress - 0.78) / 0.22, 0, 1) : 1;
+        const centerX = layout.boardX + layout.boardWidth / 2;
+        const centerY = layout.boardY + layout.boardHeight * 0.34;
+        const ringRadius = layout.boardWidth * (0.13 + progress * 0.46);
+        const burstCount = 24;
+
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = fade;
+        ctx.strokeStyle = effect.color;
+        ctx.lineWidth = Math.max(2, layout.cellSize * 0.08);
+        ctx.shadowColor = effect.color;
+        ctx.shadowBlur = Math.max(18, layout.cellSize * 0.9);
+
+        for (let index = 0; index < 3; index += 1) {
+            ctx.globalAlpha = fade * (0.42 - index * 0.1);
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, ringRadius + index * layout.cellSize * 0.45, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        for (let index = 0; index < burstCount; index += 1) {
+            const angle = (Math.PI * 2 * index) / burstCount;
+            const sparkProgress = clamp((progress - 0.1) / 0.76, 0, 1);
+            const distance = layout.boardWidth * (0.08 + sparkProgress * 0.44);
+            const x = centerX + Math.cos(angle) * distance;
+            const y = centerY + Math.sin(angle) * distance * 0.68;
+            const radius = Math.max(2, layout.cellSize * 0.09 * (1 - sparkProgress * 0.45));
+            ctx.globalAlpha = fade * (1 - sparkProgress * 0.72);
+            ctx.fillStyle = index % 3 === 0 ? "#54d3a5" : effect.color;
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        const scale = 0.84 + intro * 0.16 + Math.sin(progress * Math.PI) * 0.04;
+        ctx.globalAlpha = fade;
+        ctx.translate(centerX, centerY);
+        ctx.scale(scale, scale);
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.lineWidth = Math.max(5, layout.cellSize * 0.15);
+        ctx.strokeStyle = "rgba(7, 16, 32, .82)";
+        ctx.fillStyle = "#f8fbff";
+        ctx.font = `900 ${Math.max(30, Math.floor(layout.cellSize * 1.35))}px Segoe UI, sans-serif`;
+        ctx.strokeText("LEVEL UP", 0, 0);
+        ctx.fillText("LEVEL UP", 0, 0);
+        ctx.fillStyle = effect.color;
+        ctx.font = `900 ${Math.max(20, Math.floor(layout.cellSize * 0.9))}px Segoe UI, sans-serif`;
+        ctx.strokeText(`LEVEL ${effect.level}`, 0, layout.cellSize * 1.18);
+        ctx.fillText(`LEVEL ${effect.level}`, 0, layout.cellSize * 1.18);
         ctx.restore();
     }
 
