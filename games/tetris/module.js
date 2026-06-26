@@ -33,6 +33,8 @@ export async function mountGame(session, options = {}) {
     let level = 1;
     let dropElapsed = 0;
     let lockElapsed = 0;
+    let clearAnimation = null;
+    let visualEffects = [];
     let running = true;
     let paused = false;
     let done = false;
@@ -77,7 +79,15 @@ export async function mountGame(session, options = {}) {
     const loop = createGameLoop({
         autoStart: false,
         update({ delta }) {
-            if (!running || paused || done) {
+            if (paused || done) {
+                return;
+            }
+            updateVisualEffects(delta);
+            if (clearAnimation) {
+                updateClearAnimation(delta);
+                return;
+            }
+            if (!running) {
                 return;
             }
             dropElapsed += delta;
@@ -134,6 +144,8 @@ export async function mountGame(session, options = {}) {
         level = 1;
         dropElapsed = 0;
         lockElapsed = 0;
+        clearAnimation = null;
+        visualEffects = [];
         running = true;
         paused = false;
         done = false;
@@ -183,7 +195,7 @@ export async function mountGame(session, options = {}) {
     }
 
     function softDrop() {
-        if (done || paused) {
+        if (done || paused || clearAnimation) {
             return;
         }
         if (movePiece(0, 1, { score: true, sound: true })) {
@@ -195,7 +207,7 @@ export async function mountGame(session, options = {}) {
     }
 
     function hardDrop() {
-        if (done || paused || !piece) {
+        if (done || paused || clearAnimation || !piece) {
             return;
         }
         let distance = 0;
@@ -210,7 +222,7 @@ export async function mountGame(session, options = {}) {
     }
 
     function movePiece(columnDelta, rowDelta, options = {}) {
-        if (done || paused || !piece) {
+        if (done || paused || clearAnimation || !piece) {
             return false;
         }
         const preview = piece.getMovePreview(columnDelta, rowDelta);
@@ -237,7 +249,7 @@ export async function mountGame(session, options = {}) {
     }
 
     function rotatePiece(direction) {
-        if (done || paused || !piece) {
+        if (done || paused || clearAnimation || !piece) {
             return false;
         }
         const accepted = piece.getWallKickTests(direction).find((test) => canPlace(test.cells));
@@ -261,11 +273,16 @@ export async function mountGame(session, options = {}) {
                 board[cell.row][cell.column] = piece.shape;
             }
         });
-        const cleared = clearLines();
-        if (cleared > 0) {
-            const scoreResult = applyLineScore(cleared);
+        piece = null;
+        const clearResult = findCompletedLines();
+        if (clearResult.count > 0) {
+            const scoreResult = applyLineScore(clearResult.count);
             sound?.play?.("score");
-            showLineMilestone(cleared, scoreResult);
+            startLineClearAnimation(clearResult.rows, clearResult.count, scoreResult);
+            showLineMilestone(clearResult.count, scoreResult);
+            syncScore();
+            draw();
+            return;
         }
         if (cells.some((cell) => cell.row < hiddenRows)) {
             endGame();
@@ -276,18 +293,37 @@ export async function mountGame(session, options = {}) {
         draw();
     }
 
-    function clearLines() {
-        let cleared = 0;
+    function completeLockAfterClear() {
+        clearLines(clearAnimation.rows);
+        clearAnimation = null;
+        if (board.slice(0, hiddenRows).some((row) => row.some(Boolean))) {
+            endGame();
+            return;
+        }
+        spawnPiece();
+        syncScore();
+        draw();
+    }
+
+    function findCompletedLines() {
+        const rows = [];
         for (let row = totalRows - 1; row >= hiddenRows; row -= 1) {
             if (!board[row].every(Boolean)) {
                 continue;
             }
+            rows.push(row);
+        }
+        return {
+            count: rows.length,
+            rows,
+        };
+    }
+
+    function clearLines(rows) {
+        [...rows].sort((a, b) => b - a).forEach((row) => {
             board.splice(row, 1);
             board.unshift(Array(columns).fill(null));
-            cleared += 1;
-            row += 1;
-        }
-        return cleared;
+        });
     }
 
     function applyLineScore(cleared) {
@@ -322,21 +358,72 @@ export async function mountGame(session, options = {}) {
             return;
         }
 
-        const title = cleared === 4
-            ? "Tetris!"
-            : cleared === 1
-                ? "Line Clear"
-                : `${cleared} Lines`;
+    }
 
-        showMilestone({
-            title,
-            detail: `+${scoreResult.award} points`,
-            tone: cleared >= 4 ? "success" : "info",
-            position: "top-center",
-            duration: cleared >= 4 ? 1200 : 900,
-            autoDismiss: true,
-            actions: [],
+    function startLineClearAnimation(rows, cleared, scoreResult) {
+        const colorsByClear = {
+            1: "#79d7ff",
+            2: "#54d3a5",
+            3: "#b58cff",
+            4: "#ffd166",
+        };
+        const color = colorsByClear[cleared] || "#79d7ff";
+        const topRow = Math.min(...rows);
+        const label = cleared === 4 ? "TETRIS " : "";
+        const blinkDuration = 0.45;
+        clearAnimation = {
+            rows: [...rows].sort((a, b) => a - b),
+            count: cleared,
+            color,
+            elapsed: 0,
+            blinkDuration,
+            gapDuration: 0.18,
+            collapseDuration: 0.3,
+        };
+
+        rows.forEach((row, rowIndex) => {
+            for (let index = 0; index < 18; index += 1) {
+                visualEffects.push({
+                    type: "spark",
+                    row,
+                    column: Math.random() * columns,
+                    dx: (Math.random() - 0.5) * 2.9,
+                    dy: -0.55 - Math.random() * 1.65,
+                    size: 0.09 + Math.random() * 0.12,
+                    color,
+                    age: -blinkDuration - rowIndex * 0.035,
+                    duration: 0.72 + Math.random() * 0.28,
+                });
+            }
         });
+
+        visualEffects.push({
+            type: "floatingText",
+            row: topRow,
+            text: `${label}+${scoreResult.award}`,
+            color,
+            age: -blinkDuration * 0.8,
+            duration: 0.92,
+        });
+    }
+
+    function updateClearAnimation(delta) {
+        clearAnimation.elapsed += delta;
+        const burstStart = clearAnimation.blinkDuration;
+        const burstEnd = burstStart + clearAnimation.gapDuration + clearAnimation.collapseDuration;
+        if (clearAnimation.elapsed >= burstEnd) {
+            completeLockAfterClear();
+        }
+    }
+
+    function updateVisualEffects(delta) {
+        if (!visualEffects.length) {
+            return;
+        }
+        visualEffects.forEach((effect) => {
+            effect.age += delta;
+        });
+        visualEffects = visualEffects.filter((effect) => effect.age < effect.duration);
     }
 
     function canPlace(cells) {
@@ -404,6 +491,8 @@ export async function mountGame(session, options = {}) {
         drawGhost(layout);
         drawPiece(layout);
         drawNext(layout);
+        drawClearAnimation(layout);
+        drawVisualEffects(layout);
     }
 
     function getLayout() {
@@ -479,7 +568,10 @@ export async function mountGame(session, options = {}) {
             for (let column = 0; column < columns; column += 1) {
                 const shape = board[row][column];
                 if (shape) {
-                    drawBlock(layout, row, column, colors[shape] || "#79a9ff", 1);
+                    if (isClearingRowHidden(row)) {
+                        continue;
+                    }
+                    drawBlock(layout, row, column, colors[shape] || "#79a9ff", 1, getClearDropOffset(row, layout));
                 }
             }
         }
@@ -508,14 +600,14 @@ export async function mountGame(session, options = {}) {
         });
     }
 
-    function drawBlock(layout, row, column, color, alpha = 1) {
+    function drawBlock(layout, row, column, color, alpha = 1, yOffset = 0) {
         const visibleRow = row - hiddenRows;
         if (visibleRow < 0 || visibleRow >= visibleRows) {
             return;
         }
         const gap = Math.max(1, Math.floor(layout.cellSize * 0.08));
         const x = layout.boardX + column * layout.cellSize + gap;
-        const y = layout.boardY + visibleRow * layout.cellSize + gap;
+        const y = layout.boardY + visibleRow * layout.cellSize + gap + yOffset;
         const size = layout.cellSize - gap * 2;
         ctx.save();
         ctx.globalAlpha = alpha;
@@ -569,6 +661,127 @@ export async function mountGame(session, options = {}) {
             ctx.fillStyle = colors[shape] || "#79a9ff";
             ctx.fillRect(px + 1, py + 1, size - 2, size - 2);
         });
+    }
+
+    function drawClearAnimation(layout) {
+        if (!clearAnimation) {
+            return;
+        }
+        const blinkProgress = clamp(clearAnimation.elapsed / clearAnimation.blinkDuration, 0, 1);
+        if (blinkProgress >= 1) {
+            drawClearGapPulse(layout);
+            return;
+        }
+
+        const pulse = 0.5 + Math.sin(blinkProgress * Math.PI * 7) * 0.5;
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        clearAnimation.rows.forEach((row) => {
+            const visibleRow = row - hiddenRows;
+            const y = layout.boardY + visibleRow * layout.cellSize;
+            ctx.globalAlpha = 0.28 + pulse * 0.46;
+            ctx.fillStyle = clearAnimation.color;
+            ctx.fillRect(layout.boardX, y, layout.boardWidth, layout.cellSize);
+            ctx.globalAlpha = 0.3 + pulse * 0.58;
+            ctx.strokeStyle = "#ffffff";
+            ctx.lineWidth = Math.max(2, layout.cellSize * 0.08);
+            ctx.strokeRect(layout.boardX + 1, y + 1, layout.boardWidth - 2, layout.cellSize - 2);
+        });
+        ctx.restore();
+    }
+
+    function drawClearGapPulse(layout) {
+        const burstElapsed = clearAnimation.elapsed - clearAnimation.blinkDuration;
+        const progress = clamp(burstElapsed / (clearAnimation.gapDuration + clearAnimation.collapseDuration), 0, 1);
+        const alpha = Math.max(0, 1 - progress);
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = alpha * 0.28;
+        ctx.fillStyle = clearAnimation.color;
+        clearAnimation.rows.forEach((row) => {
+            const visibleRow = row - hiddenRows;
+            const y = layout.boardY + visibleRow * layout.cellSize;
+            ctx.fillRect(layout.boardX, y, layout.boardWidth, layout.cellSize);
+        });
+        ctx.restore();
+    }
+
+    function isClearingRowHidden(row) {
+        return !!clearAnimation
+            && clearAnimation.elapsed >= clearAnimation.blinkDuration
+            && clearAnimation.rows.includes(row);
+    }
+
+    function getClearDropOffset(row, layout) {
+        if (!clearAnimation || clearAnimation.elapsed < clearAnimation.blinkDuration + clearAnimation.gapDuration) {
+            return 0;
+        }
+        const rowsBelow = clearAnimation.rows.filter((clearedRow) => clearedRow > row).length;
+        if (!rowsBelow) {
+            return 0;
+        }
+        const rawProgress = (clearAnimation.elapsed - clearAnimation.blinkDuration - clearAnimation.gapDuration) / clearAnimation.collapseDuration;
+        const progress = 1 - Math.pow(1 - clamp(rawProgress, 0, 1), 3);
+        return rowsBelow * layout.cellSize * progress;
+    }
+
+    function drawVisualEffects(layout) {
+        if (!visualEffects.length) {
+            return;
+        }
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        visualEffects.forEach((effect) => {
+            if (effect.age < 0) {
+                return;
+            }
+            if (effect.type === "spark") {
+                drawSpark(layout, effect);
+            }
+            if (effect.type === "floatingText") {
+                drawFloatingText(layout, effect);
+            }
+        });
+        ctx.restore();
+    }
+
+    function drawSpark(layout, effect) {
+        const progress = clamp(effect.age / effect.duration, 0, 1);
+        const visibleRow = effect.row - hiddenRows;
+        const x = layout.boardX + (effect.column + 0.5 + effect.dx * progress) * layout.cellSize;
+        const y = layout.boardY + (visibleRow + 0.5 + effect.dy * progress + progress * progress * 0.8) * layout.cellSize;
+        const radius = Math.max(2, layout.cellSize * effect.size * (1 - progress * 0.45));
+
+        ctx.save();
+        ctx.globalAlpha = (1 - progress) * 0.9;
+        ctx.fillStyle = effect.color;
+        ctx.shadowColor = effect.color;
+        ctx.shadowBlur = Math.max(6, layout.cellSize * 0.4);
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+
+    function drawFloatingText(layout, effect) {
+        const progress = clamp(effect.age / effect.duration, 0, 1);
+        const visibleRow = effect.row - hiddenRows;
+        const x = layout.boardX + layout.boardWidth / 2;
+        const y = layout.boardY + visibleRow * layout.cellSize - 10 - progress * layout.cellSize * 1.15;
+
+        ctx.save();
+        ctx.globalAlpha = 1 - progress;
+        ctx.fillStyle = "#eaf2ff";
+        ctx.strokeStyle = "rgba(7, 16, 32, 0.72)";
+        ctx.lineWidth = Math.max(4, layout.cellSize * 0.12);
+        ctx.shadowColor = effect.color;
+        ctx.shadowBlur = 22;
+        ctx.font = `900 ${Math.max(32, Math.floor(layout.cellSize * 1.15))}px Segoe UI, sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.strokeText(effect.text, x, y);
+        ctx.fillText(effect.text, x, y);
+        ctx.restore();
     }
 
     function getDropDistance() {
