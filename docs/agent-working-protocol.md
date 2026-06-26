@@ -20,27 +20,21 @@ Before editing, check `git status`. If unrelated files are already modified, lea
 
 ## Branch Naming
 
-Use meaningful branch names with this shape:
+Use meaningful branch names with this shape for all task branches, regardless of whether they are created by Codex, another agent, or a human contributor:
 
 ```text
 <category>/<task-name>
 ```
 
-Codex-created branches should use the standard Codex prefix unless the operator asks otherwise:
-
-```text
-codex/<category>/<task-name>
-```
-
 Good examples:
 
 ```text
-codex/game/supply-run-assets
-codex/assets/tetris-home-screen
-codex/helper/vendor-refresh
-codex/docs/agent-working-protocol
-codex/ui/launcher-search
-codex/game/snake-controls
+game/supply-run-assets
+assets/tetris-home-screen
+helper/vendor-refresh
+docs/agent-working-protocol
+ui/launcher-search
+game/snake-controls
 ```
 
 Avoid vague names:

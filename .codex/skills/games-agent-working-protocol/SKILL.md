@@ -24,7 +24,7 @@ Do not duplicate the full protocol here. Update this skill only when routing rul
 
 - Start every new Games task from latest `main`.
 - Check `git status` before editing.
-- Use branch names shaped as `codex/<category>/<task-name>` unless Jonathan asks otherwise.
+- Use branch names shaped as `<category>/<task-name>` for all task branches.
 - Keep one task per branch.
 - Do not mix Helper vendor refreshes into unrelated game-only changes.
 - Do not patch Helper internals inside Games.
