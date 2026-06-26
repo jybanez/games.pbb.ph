@@ -11,6 +11,7 @@ export async function mountGame(session, options = {}) {
     let effects = [];
     let powerups = createPointCollectibleLayer();
     let widePaddleRemaining = 0;
+    let score = 0;
     let trailElapsed = 0;
     let effectTime = 0;
     let running = true;
@@ -104,11 +105,18 @@ export async function mountGame(session, options = {}) {
         blocks.forEach((block) => {
             if (block.live && ball.x + ballRadius > block.x && ball.x - ballRadius < block.x + block.width && ball.y + ballRadius > block.y && ball.y - ballRadius < block.y + block.height) {
                 block.live = false;
+                score += block.points;
                 addEffect("blockBreak", block.x + block.width / 2, block.y + block.height / 2, {
                     width: block.width,
                     height: block.height,
                     color: block.color,
-                    duration: 0.28,
+                    particles: createBreakParticles(block, metrics),
+                    duration: 0.42,
+                });
+                addEffect("scorePopup", block.x + block.width / 2, block.y + block.height / 2, {
+                    text: `+${block.points}`,
+                    color: block.color,
+                    duration: 0.72,
                 });
                 maybeSpawnPowerup(block, metrics);
                 syncScore();
@@ -128,19 +136,23 @@ export async function mountGame(session, options = {}) {
         ctx.clearRect(0, 0, width, height);
         ctx.fillStyle = "#07101d";
         ctx.fillRect(0, 0, width, height);
+        drawStageGlow(metrics);
         drawBlockEffects();
         blocks.filter((block) => block.live).forEach((block) => {
-            ctx.fillStyle = block.color;
-            ctx.fillRect(block.x, block.y, block.width, block.height);
+            drawBlock(block, metrics);
         });
+        drawScorePopups(metrics);
         drawPowerups(metrics);
         drawBallTrail();
-        ctx.fillStyle = "#4fd29b";
-        ctx.fillRect(paddle, paddleY, paddleWidth, paddleHeight);
+        drawPaddle(metrics);
         drawPaddlePulse(metrics);
+        ctx.fillStyle = "#d9f7ff";
+        ctx.shadowColor = "#79d7ff";
+        ctx.shadowBlur = Math.max(8, ballRadius * 2.2);
         ctx.beginPath();
         ctx.arc(ball.x, ball.y, ballRadius, 0, Math.PI * 2);
         ctx.fill();
+        ctx.shadowBlur = 0;
     }
 
     function handleKeydown(event) {
@@ -167,6 +179,7 @@ export async function mountGame(session, options = {}) {
         effects = [];
         powerups.reset();
         widePaddleRemaining = 0;
+        score = 0;
         trailElapsed = 0;
         effectTime = 0;
         running = true;
@@ -178,7 +191,7 @@ export async function mountGame(session, options = {}) {
 
     function syncScore() {
         const remaining = blocks.filter((block) => block.live).length;
-        ui.score.textContent = `Blocks ${remaining}`;
+        ui.score.textContent = `Score ${score}  Blocks ${remaining}`;
     }
 
     function syncToStageSize() {
@@ -251,6 +264,7 @@ export async function mountGame(session, options = {}) {
                     width: metrics.blockWidth,
                     height: metrics.blockHeight,
                     color: blockColor(y),
+                    points: 40 + (metrics.blockRows - y) * 15,
                     live: true,
                 });
             }
@@ -287,6 +301,11 @@ export async function mountGame(session, options = {}) {
                 height: metrics.paddleHeight,
                 duration: 0.34,
             });
+            addEffect("scorePopup", paddle + metrics.paddleWidth / 2, metrics.paddleY - metrics.paddleHeight * 1.4, {
+                text: "WIDE PADDLE",
+                color: "#ffd166",
+                duration: 0.9,
+            });
             sound?.play?.("select", { volume: 0.5 });
         }
         if (widePaddleRemaining > 0) {
@@ -321,16 +340,90 @@ export async function mountGame(session, options = {}) {
         });
     }
 
+    function createBreakParticles(block, metrics) {
+        const count = metrics.width < 520 ? 7 : 10;
+        return Array.from({ length: count }, () => ({
+            x: (Math.random() - 0.5) * block.width * 0.78,
+            y: (Math.random() - 0.5) * block.height * 0.7,
+            dx: (Math.random() - 0.5) * block.width * 1.35,
+            dy: (Math.random() - 0.65) * block.height * 2.4,
+            size: Math.max(3, Math.min(block.height * 0.38, 8) * (0.65 + Math.random() * 0.8)),
+            spin: (Math.random() - 0.5) * Math.PI,
+        }));
+    }
+
+    function drawStageGlow(metrics) {
+        ctx.save();
+        ctx.globalAlpha = 0.42;
+        ctx.strokeStyle = "rgba(47, 119, 255, .18)";
+        ctx.lineWidth = 1;
+        const spacing = clamp(metrics.width * 0.075, 32, 64);
+        for (let x = -spacing; x < metrics.width + spacing; x += spacing) {
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x + metrics.height * 0.1, metrics.height);
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+
+    function drawBlock(block, metrics) {
+        const radius = Math.max(3, Math.min(block.height * 0.38, 8));
+        const shineHeight = Math.max(2, block.height * 0.24);
+
+        ctx.save();
+        ctx.shadowColor = block.color;
+        ctx.shadowBlur = Math.max(6, block.height * 0.65);
+        ctx.fillStyle = block.color;
+        ctx.beginPath();
+        roundRectPath(block.x, block.y, block.width, block.height, radius);
+        ctx.fill();
+
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 0.28;
+        ctx.fillStyle = "#ffffff";
+        ctx.beginPath();
+        roundRectPath(block.x + 1, block.y + 1, block.width - 2, shineHeight, Math.max(2, radius - 1));
+        ctx.fill();
+
+        ctx.globalAlpha = 0.4;
+        ctx.strokeStyle = "rgba(255, 255, 255, .32)";
+        ctx.lineWidth = Math.max(1, metrics.blockHeight * 0.08);
+        ctx.beginPath();
+        roundRectPath(block.x + 0.5, block.y + 0.5, block.width - 1, block.height - 1, radius);
+        ctx.stroke();
+        ctx.restore();
+    }
+
     function drawBlockEffects() {
         effects.filter((effect) => effect.type === "blockBreak").forEach((effect) => {
             const progress = effect.age / effect.duration;
-            const scale = 1 + progress * 0.35;
+            const scale = 1 + progress * 0.55;
             ctx.save();
-            ctx.globalAlpha = Math.max(0, 1 - progress);
+            ctx.globalCompositeOperation = "lighter";
+            ctx.globalAlpha = Math.max(0, 1 - progress) * 0.72;
             ctx.fillStyle = effect.color || "#79a9ff";
+            ctx.shadowColor = effect.color || "#79a9ff";
+            ctx.shadowBlur = Math.max(10, effect.height * 0.9);
             ctx.translate(effect.x, effect.y);
             ctx.scale(scale, scale);
-            ctx.fillRect(-effect.width / 2, -effect.height / 2, effect.width, effect.height);
+            ctx.beginPath();
+            roundRectPath(-effect.width / 2, -effect.height / 2, effect.width, effect.height, Math.max(3, effect.height * 0.35));
+            ctx.fill();
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+            effect.particles?.forEach((particle) => {
+                const x = effect.x + particle.x + particle.dx * progress;
+                const y = effect.y + particle.y + particle.dy * progress + progress * progress * effect.height * 1.8;
+                const size = particle.size * (1 - progress * 0.35);
+                ctx.save();
+                ctx.globalAlpha = Math.max(0, 1 - progress);
+                ctx.translate(x, y);
+                ctx.rotate(particle.spin * progress * 2);
+                ctx.fillStyle = effect.color || "#79a9ff";
+                ctx.fillRect(-size / 2, -size / 2, size, size);
+                ctx.restore();
+            });
             ctx.restore();
         });
     }
@@ -339,13 +432,54 @@ export async function mountGame(session, options = {}) {
         effects.filter((effect) => effect.type === "ballTrail").forEach((effect) => {
             const progress = effect.age / effect.duration;
             ctx.save();
-            ctx.globalAlpha = (1 - progress) * 0.32;
-            ctx.fillStyle = "#d9f7ff";
+            ctx.globalCompositeOperation = "lighter";
+            ctx.globalAlpha = (1 - progress) * 0.44;
+            ctx.fillStyle = "#79d7ff";
+            ctx.shadowColor = "#79d7ff";
+            ctx.shadowBlur = Math.max(8, effect.radius * 2);
             ctx.beginPath();
-            ctx.arc(effect.x, effect.y, effect.radius * (1 - progress * 0.35), 0, Math.PI * 2);
+            ctx.arc(effect.x, effect.y, effect.radius * (1.25 - progress * 0.35), 0, Math.PI * 2);
             ctx.fill();
             ctx.restore();
         });
+    }
+
+    function drawScorePopups(metrics) {
+        effects.filter((effect) => effect.type === "scorePopup").forEach((effect) => {
+            const progress = effect.age / effect.duration;
+            const y = effect.y - metrics.ballRadius * 5 * progress;
+            ctx.save();
+            ctx.globalCompositeOperation = "lighter";
+            ctx.globalAlpha = Math.max(0, 1 - progress);
+            ctx.fillStyle = "#f8fbff";
+            ctx.strokeStyle = "rgba(7, 16, 29, .84)";
+            ctx.lineWidth = Math.max(3, metrics.ballRadius * 0.45);
+            ctx.shadowColor = effect.color || "#ffd166";
+            ctx.shadowBlur = Math.max(10, metrics.ballRadius * 2.4);
+            ctx.font = `900 ${Math.max(15, Math.floor(metrics.ballRadius * 2.45))}px Segoe UI, sans-serif`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.strokeText(effect.text, effect.x, y);
+            ctx.fillText(effect.text, effect.x, y);
+            ctx.restore();
+        });
+    }
+
+    function drawPaddle(metrics) {
+        const radius = Math.max(4, metrics.paddleHeight * 0.45);
+        ctx.save();
+        ctx.fillStyle = widePaddleRemaining > 0 ? "#ffd166" : "#4fd29b";
+        ctx.shadowColor = widePaddleRemaining > 0 ? "#ffd166" : "#54d3a5";
+        ctx.shadowBlur = Math.max(8, metrics.paddleHeight * 1.1);
+        ctx.beginPath();
+        roundRectPath(paddle, metrics.paddleY, metrics.paddleWidth, metrics.paddleHeight, radius);
+        ctx.fill();
+        ctx.globalAlpha = 0.38;
+        ctx.fillStyle = "#ffffff";
+        ctx.beginPath();
+        roundRectPath(paddle + 2, metrics.paddleY + 1, metrics.paddleWidth - 4, Math.max(2, metrics.paddleHeight * 0.28), radius);
+        ctx.fill();
+        ctx.restore();
     }
 
     function drawPaddlePulse(metrics) {
@@ -372,6 +506,8 @@ export async function mountGame(session, options = {}) {
             ctx.save();
             ctx.fillStyle = "#ffd166";
             ctx.globalAlpha = 0.94;
+            ctx.shadowColor = "#ffd166";
+            ctx.shadowBlur = Math.max(8, item.radius * 0.9);
             ctx.beginPath();
             roundRectPath(item.x - size / 2, item.y - size / 2, size, size, Math.max(3, item.radius * 0.28));
             ctx.fill();
@@ -380,6 +516,10 @@ export async function mountGame(session, options = {}) {
             ctx.beginPath();
             ctx.moveTo(item.x - item.radius * 0.45, item.y);
             ctx.lineTo(item.x + item.radius * 0.45, item.y);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(item.x, item.y - item.radius * 0.45);
+            ctx.lineTo(item.x, item.y + item.radius * 0.45);
             ctx.stroke();
             ctx.restore();
         });
