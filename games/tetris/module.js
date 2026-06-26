@@ -320,8 +320,11 @@ export async function mountGame(session, options = {}) {
     }
 
     function clearLines(rows) {
-        [...rows].sort((a, b) => b - a).forEach((row) => {
+        const clearedRows = [...new Set(rows)].sort((a, b) => b - a);
+        clearedRows.forEach((row) => {
             board.splice(row, 1);
+        });
+        clearedRows.forEach(() => {
             board.unshift(Array(columns).fill(null));
         });
     }
