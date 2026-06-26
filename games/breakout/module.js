@@ -4,6 +4,13 @@ export async function mountGame(session, options = {}) {
     const ctx = layer.context;
     const ui = createShell(session, options.game);
     const sound = options.sound;
+    const levelDefinitions = [
+        { id: "level-1", rows: 4, mobileColumns: 6, desktopColumns: 8, speed: 1, powerChance: 0.18, scoreMultiplier: 1, clearBonus: 400 },
+        { id: "level-2", rows: 5, mobileColumns: 6, desktopColumns: 8, speed: 1.08, powerChance: 0.18, scoreMultiplier: 1.12, clearBonus: 600 },
+        { id: "level-3", rows: 5, mobileColumns: 7, desktopColumns: 9, speed: 1.16, powerChance: 0.16, scoreMultiplier: 1.25, clearBonus: 800 },
+        { id: "level-4", rows: 6, mobileColumns: 7, desktopColumns: 9, speed: 1.26, powerChance: 0.15, scoreMultiplier: 1.4, clearBonus: 1000 },
+        { id: "level-5", rows: 6, mobileColumns: 7, desktopColumns: 10, speed: 1.36, powerChance: 0.14, scoreMultiplier: 1.58, clearBonus: 1200 },
+    ];
 
     let paddle = 0;
     let ball = { x: 0, y: 0, vx: 0, vy: 0 };
@@ -12,6 +19,8 @@ export async function mountGame(session, options = {}) {
     let powerups = createPointCollectibleLayer();
     let widePaddleRemaining = 0;
     let score = 0;
+    let levelIndex = 0;
+    let levelTransitionRemaining = 0;
     let trailElapsed = 0;
     let effectTime = 0;
     let running = true;
@@ -69,6 +78,13 @@ export async function mountGame(session, options = {}) {
         const { width, height, ballRadius, paddleWidth, paddleY } = metrics;
         effectTime += delta;
         updateEffects(delta, metrics);
+        if (levelTransitionRemaining > 0) {
+            levelTransitionRemaining = Math.max(0, levelTransitionRemaining - delta);
+            if (levelTransitionRemaining === 0) {
+                startLevel(levelIndex + 1, { announce: true });
+            }
+            return;
+        }
         ball.x += ball.vx * delta;
         ball.y += ball.vy * delta;
         trailElapsed += delta;
@@ -90,7 +106,7 @@ export async function mountGame(session, options = {}) {
         }
         if (ball.y > height) {
             running = false;
-            options.onStateChange?.("gameOver", { detail: `${blocks.filter((block) => block.live).length} blocks remaining` });
+            options.onStateChange?.("gameOver", { detail: `Level ${levelIndex + 1} | ${blocks.filter((block) => block.live).length} blocks remaining` });
             return;
         }
         if (ball.y + ballRadius >= paddleY && ball.y - ballRadius <= paddleY + metrics.paddleHeight && ball.x > paddle && ball.x < paddle + paddleWidth) {
@@ -125,8 +141,7 @@ export async function mountGame(session, options = {}) {
             }
         });
         if (blocks.every((block) => !block.live)) {
-            running = false;
-            options.onStateChange?.("won", { title: "Cleared", detail: "All blocks cleared" });
+            beginLevelTransition();
         }
     }
 
@@ -172,26 +187,63 @@ export async function mountGame(session, options = {}) {
     }
 
     function reset() {
-        const metrics = getMetrics();
-        paddle = (metrics.width - metrics.paddleWidth) / 2;
-        ball = createBall(metrics);
-        blocks = createBlocks(metrics);
         effects = [];
         powerups.reset();
         widePaddleRemaining = 0;
         score = 0;
+        levelIndex = 0;
+        levelTransitionRemaining = 0;
         trailElapsed = 0;
         effectTime = 0;
         running = true;
         paused = false;
+        startLevel(0, { announce: false });
         options.onStateChange?.("playing");
         syncScore();
         draw();
     }
 
+    function startLevel(nextLevelIndex, options = {}) {
+        levelIndex = nextLevelIndex;
+        const metrics = getMetrics();
+        paddle = (metrics.width - metrics.paddleWidth) / 2;
+        ball = createBall(metrics);
+        blocks = createBlocks(metrics);
+        powerups.reset();
+        widePaddleRemaining = 0;
+        trailElapsed = 0;
+        running = true;
+        if (options.announce) {
+            addEffect("levelBanner", metrics.width / 2, metrics.height * 0.36, {
+                title: `Level ${levelIndex + 1}`,
+                detail: getLevelDefinition().id.replace("-", " "),
+                color: "#79d7ff",
+                duration: 1,
+            });
+        }
+        syncScore();
+    }
+
+    function beginLevelTransition() {
+        const metrics = getMetrics();
+        const level = getLevelDefinition();
+        score += level.clearBonus;
+        levelTransitionRemaining = 1.25;
+        powerups.reset();
+        widePaddleRemaining = 0;
+        addEffect("levelBanner", metrics.width / 2, metrics.height * 0.36, {
+            title: `Level ${levelIndex + 1} Clear`,
+            detail: `+${level.clearBonus} bonus | Next Level ${levelIndex + 2}`,
+            color: "#ffd166",
+            duration: 1.2,
+        });
+        syncScore();
+        sound?.play?.("score", { volume: 0.75 });
+    }
+
     function syncScore() {
         const remaining = blocks.filter((block) => block.live).length;
-        ui.score.textContent = `Score ${score}  Blocks ${remaining}`;
+        ui.score.textContent = `Score ${score}  Lv ${levelIndex + 1}  Blocks ${remaining}`;
     }
 
     function syncToStageSize() {
@@ -204,6 +256,7 @@ export async function mountGame(session, options = {}) {
     }
 
     function getMetrics() {
+        const level = getLevelDefinition();
         const width = Math.max(240, layer.canvas.width || session.viewport.clientWidth || 640);
         const height = Math.max(220, layer.canvas.height || session.viewport.clientHeight || 480);
         const basePaddleWidth = clamp(width * 0.14, 64, 112);
@@ -211,9 +264,9 @@ export async function mountGame(session, options = {}) {
         const paddleHeight = clamp(height * 0.014, 8, 12);
         const paddleY = height - clamp(height * 0.075, 24, 42);
         const ballRadius = clamp(Math.min(width, height) * 0.016, 6, 9);
-        const ballSpeed = clamp(Math.min(width, height) * 0.62, 170, 300);
-        const blockColumns = width < 520 ? 6 : 8;
-        const blockRows = 4;
+        const ballSpeed = clamp(Math.min(width, height) * 0.62, 170, 300) * level.speed;
+        const blockColumns = width < 520 ? level.mobileColumns : level.desktopColumns;
+        const blockRows = level.rows;
         const blockGap = clamp(width * 0.022, 8, 22);
         const blockMargin = clamp(width * 0.07, 18, 90);
         const blockWidth = Math.max(24, (width - blockMargin * 2 - blockGap * (blockColumns - 1)) / blockColumns);
@@ -254,6 +307,7 @@ export async function mountGame(session, options = {}) {
     }
 
     function createBlocks(metrics = getMetrics()) {
+        const level = getLevelDefinition();
         const result = [];
         for (let y = 0; y < metrics.blockRows; y += 1) {
             for (let x = 0; x < metrics.blockColumns; x += 1) {
@@ -264,7 +318,7 @@ export async function mountGame(session, options = {}) {
                     width: metrics.blockWidth,
                     height: metrics.blockHeight,
                     color: blockColor(y),
-                    points: 40 + (metrics.blockRows - y) * 15,
+                    points: Math.round((40 + (metrics.blockRows - y) * 15) * level.scoreMultiplier),
                     live: true,
                 });
             }
@@ -315,7 +369,7 @@ export async function mountGame(session, options = {}) {
     }
 
     function maybeSpawnPowerup(block, metrics) {
-        if (powerups.size() >= 1 || Math.random() > 0.18) {
+        if (powerups.size() >= 1 || Math.random() > getLevelDefinition().powerChance) {
             return;
         }
         powerups.spawn({
@@ -326,6 +380,23 @@ export async function mountGame(session, options = {}) {
             radius: clamp(metrics.ballRadius * 1.45, 9, 14),
             vy: metrics.ballSpeed * 0.36,
         });
+    }
+
+    function getLevelDefinition() {
+        const lastLevel = levelDefinitions[levelDefinitions.length - 1];
+        const base = levelDefinitions[levelIndex] || lastLevel;
+        if (levelIndex < levelDefinitions.length) {
+            return base;
+        }
+        const extra = levelIndex - levelDefinitions.length + 1;
+        return {
+            ...base,
+            id: `level-${levelIndex + 1}`,
+            speed: base.speed + extra * 0.06,
+            powerChance: Math.max(0.1, base.powerChance - extra * 0.005),
+            scoreMultiplier: base.scoreMultiplier + extra * 0.12,
+            clearBonus: base.clearBonus + extra * 180,
+        };
     }
 
     function addEffect(type, x, y, options = {}) {
@@ -463,6 +534,43 @@ export async function mountGame(session, options = {}) {
             ctx.fillText(effect.text, effect.x, y);
             ctx.restore();
         });
+        effects.filter((effect) => effect.type === "levelBanner").forEach((effect) => {
+            drawLevelBanner(metrics, effect);
+        });
+    }
+
+    function drawLevelBanner(metrics, effect) {
+        const progress = effect.age / effect.duration;
+        const intro = clamp(progress / 0.18, 0, 1);
+        const fade = progress > 0.78 ? 1 - clamp((progress - 0.78) / 0.22, 0, 1) : 1;
+        const ringRadius = metrics.width * (0.08 + progress * 0.22);
+
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = fade;
+        ctx.strokeStyle = effect.color || "#ffd166";
+        ctx.lineWidth = Math.max(2, metrics.ballRadius * 0.42);
+        ctx.shadowColor = effect.color || "#ffd166";
+        ctx.shadowBlur = Math.max(18, metrics.ballRadius * 3);
+        ctx.beginPath();
+        ctx.arc(effect.x, effect.y, ringRadius, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.translate(effect.x, effect.y);
+        ctx.scale(0.88 + intro * 0.12, 0.88 + intro * 0.12);
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.lineWidth = Math.max(4, metrics.ballRadius * 0.58);
+        ctx.strokeStyle = "rgba(7, 16, 29, .84)";
+        ctx.fillStyle = "#f8fbff";
+        ctx.font = `900 ${Math.max(24, Math.floor(metrics.ballRadius * 4.4))}px Segoe UI, sans-serif`;
+        ctx.strokeText(effect.title, 0, 0);
+        ctx.fillText(effect.title, 0, 0);
+        ctx.fillStyle = effect.color || "#ffd166";
+        ctx.font = `800 ${Math.max(13, Math.floor(metrics.ballRadius * 2))}px Segoe UI, sans-serif`;
+        ctx.strokeText(effect.detail, 0, metrics.ballRadius * 5.2);
+        ctx.fillText(effect.detail, 0, metrics.ballRadius * 5.2);
+        ctx.restore();
     }
 
     function drawPaddle(metrics) {
@@ -561,7 +669,7 @@ function createShell(session, game) {
 
     const score = document.createElement("p");
     score.className = "ui-badge pbb-game-session-score";
-    score.textContent = "Blocks 0";
+    score.textContent = "Score 0  Lv 1  Blocks 0";
 
     hud.append(title);
     root.append(hud, score);
