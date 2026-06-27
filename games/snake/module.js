@@ -9,11 +9,11 @@ export async function mountGame(session, options = {}) {
 
     const desktopColumns = 32;
     const levels = [
-        { id: "supply-start", level: 1, title: "Supply Start", scoreTarget: 0, tickInterval: 0.138, bonusEvery: 5, bonusTtl: 5.5 },
-        { id: "route-pace", level: 2, title: "Route Pace", scoreTarget: 6, tickInterval: 0.124, bonusEvery: 5, bonusTtl: 5.1 },
-        { id: "quick-hands", level: 3, title: "Quick Hands", scoreTarget: 14, tickInterval: 0.112, bonusEvery: 4, bonusTtl: 4.8 },
-        { id: "barangay-run", level: 4, title: "Barangay Run", scoreTarget: 24, tickInterval: 0.102, bonusEvery: 4, bonusTtl: 4.5 },
-        { id: "responder-flow", level: 5, title: "Responder Flow", scoreTarget: 38, tickInterval: 0.094, bonusEvery: 3, bonusTtl: 4.2 },
+        { id: "supply-start", level: 1, title: "Supply Start", targetSupplies: 5, tickSeconds: 0.138, foodValue: 1, bonusEvery: 5, bonusValue: 3, bonusTtl: 5.5 },
+        { id: "route-pace", level: 2, title: "Route Pace", targetSupplies: 10, tickSeconds: 0.124, foodValue: 1, bonusEvery: 5, bonusValue: 4, bonusTtl: 5.1 },
+        { id: "quick-hands", level: 3, title: "Quick Hands", targetSupplies: 16, tickSeconds: 0.112, foodValue: 1, bonusEvery: 4, bonusValue: 4, bonusTtl: 4.8 },
+        { id: "barangay-run", level: 4, title: "Barangay Run", targetSupplies: 24, tickSeconds: 0.102, foodValue: 1, bonusEvery: 4, bonusValue: 5, bonusTtl: 4.5 },
+        { id: "responder-flow", level: 5, title: "Responder Flow", targetSupplies: 34, tickSeconds: 0.094, foodValue: 1, bonusEvery: 3, bonusValue: 5, bonusTtl: 4.2 },
     ];
     let bounds = getBounds();
     let snake = [centerCell(bounds)];
@@ -54,14 +54,17 @@ export async function mountGame(session, options = {}) {
     const loop = createGameLoop({
         autoStart: false,
         update({ delta }) {
-            elapsed += delta;
-            pulseTime += delta;
-            updateEffects(delta);
-            if (done || paused) {
+            if (paused) {
                 return;
             }
+            pulseTime += delta;
+            updateEffects(delta);
+            if (done) {
+                return;
+            }
+            elapsed += delta;
             updateBonus(delta);
-            if (elapsed >= currentLevel.tickInterval) {
+            if (elapsed >= currentLevel.tickSeconds) {
                 elapsed = 0;
                 tick();
             }
@@ -185,15 +188,15 @@ export async function mountGame(session, options = {}) {
         dir = { x: 1, y: 0 };
         next = { x: 1, y: 0 };
         supplies.reset();
-        ensureFood({
-            column: Math.min(bounds.columns - 4, centerCell(bounds).x + 5),
-            row: centerCell(bounds).y,
-        });
         score = 0;
         foodCollected = 0;
         combo = 0;
         comboTimer = 0;
         currentLevel = levels[0];
+        ensureFood({
+            column: Math.min(bounds.columns - 4, centerCell(bounds).x + 5),
+            row: centerCell(bounds).y,
+        });
         elapsed = 0;
         pulseTime = 0;
         eatEffects = [];
@@ -209,9 +212,8 @@ export async function mountGame(session, options = {}) {
     }
 
     function syncScore() {
-        const nextLevel = levels.find((level) => level.level === currentLevel.level + 1);
-        const nextLabel = nextLevel ? `  Next ${Math.max(0, nextLevel.scoreTarget - score)}` : "  Max Lv";
-        ui.score.textContent = `Score ${score}  Lv ${currentLevel.level}${nextLabel}`;
+        const nextLevel = getLevelByNumber(currentLevel.level + 1);
+        ui.score.textContent = `Score ${score}  Lv ${currentLevel.level}`;
         options.onProgress?.({
             type: "progress:update",
             progress: {
@@ -223,15 +225,15 @@ export async function mountGame(session, options = {}) {
                 difficulty: currentLevel.level <= 2 ? "easy" : currentLevel.level <= 4 ? "normal" : "hard",
                 objective: "Collect supplies and keep the route clear",
                 score,
-                progressCurrent: nextLevel ? score : currentLevel.scoreTarget,
-                progressTarget: nextLevel?.scoreTarget || currentLevel.scoreTarget,
-                progressLabel: nextLevel ? `Next level in ${Math.max(0, nextLevel.scoreTarget - score)}` : "Max level",
+                progressCurrent: foodCollected,
+                progressTarget: nextLevel.targetSupplies,
+                progressLabel: `Next level in ${Math.max(0, nextLevel.targetSupplies - foodCollected)} supplies`,
             },
         });
     }
 
     function syncLevel() {
-        currentLevel = getLevelForScore(score);
+        currentLevel = getLevelForSupplies(foodCollected);
     }
 
     function ensureFood(preferred = null) {
@@ -241,7 +243,7 @@ export async function mountGame(session, options = {}) {
         supplies.spawn({
             id: "food",
             type: "food",
-            value: 1,
+            value: currentLevel.foodValue,
             column: preferred?.column,
             row: preferred?.row,
         });
@@ -252,7 +254,7 @@ export async function mountGame(session, options = {}) {
             supplies.spawn({
                 id: "bonus",
                 type: "bonus",
-                value: 3,
+                value: currentLevel.bonusValue,
                 ttl: currentLevel.bonusTtl,
             });
             banners.push({
@@ -750,8 +752,29 @@ export async function mountGame(session, options = {}) {
         ctx.restore();
     }
 
-    function getLevelForScore(value) {
-        return [...levels].reverse().find((level) => value >= level.scoreTarget) || levels[0];
+    function getLevelForSupplies(value) {
+        const authored = levels.find((level) => value < level.targetSupplies);
+        return authored || getLevelByNumber(levels[levels.length - 1].level + Math.floor((value - levels[levels.length - 1].targetSupplies) / 10) + 1);
+    }
+
+    function getLevelByNumber(levelNumber) {
+        const authored = levels.find((level) => level.level === levelNumber);
+        if (authored) {
+            return authored;
+        }
+        const last = levels[levels.length - 1];
+        const extraLevels = Math.max(1, levelNumber - last.level);
+        return {
+            ...last,
+            id: `extended-route-${levelNumber}`,
+            level: levelNumber,
+            title: "Extended Route",
+            targetSupplies: last.targetSupplies + extraLevels * 10,
+            tickSeconds: Math.max(0.082, last.tickSeconds - extraLevels * 0.004),
+            bonusEvery: Math.max(3, last.bonusEvery - Math.floor(extraLevels / 3)),
+            bonusValue: last.bonusValue + Math.floor(extraLevels / 2),
+            bonusTtl: Math.max(3.6, last.bonusTtl - extraLevels * 0.15),
+        };
     }
 
     function roundRectPath(x, y, width, height, radius) {
