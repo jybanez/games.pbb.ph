@@ -953,8 +953,7 @@ async function startPlayingFromHome(gameState) {
         return;
     }
 
-    await unlockGameAudio();
-    playGameSound("select");
+    unlockGameAudio().then(() => playGameSound("select"));
     clearGameHome(gameState);
     setActiveChromeState(gameState.session, "countdown");
     await playLaunchCountdown(gameState.session.overlay);
