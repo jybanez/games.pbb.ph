@@ -7,7 +7,7 @@ export async function mountGame(session, options = {}) {
     const controlsHost = document.createElement("div");
     ui.movementControls.appendChild(controlsHost);
 
-    const columns = 32;
+    const desktopColumns = 32;
     const levels = [
         { id: "supply-start", level: 1, title: "Supply Start", scoreTarget: 0, tickInterval: 0.138, bonusEvery: 5, bonusTtl: 5.5 },
         { id: "route-pace", level: 2, title: "Route Pace", scoreTarget: 6, tickInterval: 0.124, bonusEvery: 5, bonusTtl: 5.1 },
@@ -284,6 +284,7 @@ export async function mountGame(session, options = {}) {
     function getBounds() {
         const width = Math.max(1, layer.canvas.width);
         const height = Math.max(1, layer.canvas.height);
+        const columns = getColumnCount(width, height);
         const rows = Math.max(18, Math.round(columns * height / width));
         return {
             columns,
@@ -293,6 +294,16 @@ export async function mountGame(session, options = {}) {
             width,
             height,
         };
+    }
+
+    function getColumnCount(width, height) {
+        if (width < 520 || height > width * 1.35) {
+            return 20;
+        }
+        if (width < 760) {
+            return 24;
+        }
+        return desktopColumns;
     }
 
     function centerCell(currentBounds) {
