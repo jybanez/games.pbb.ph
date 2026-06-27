@@ -64,6 +64,7 @@ const PLAYER_START_ENERGY = 100;
 const PLAYER_START_SHIELD = 70;
 const PLAYER_START_LIVES = 3;
 const PLAYER_RESPAWN_SECONDS = 0.9;
+const PLAYER_RESPAWN_DELAY_SECONDS = 0.88;
 
 export function mountGame(session, options = {}) {
     const { createGameLoop, createVirtualJoystick, createGameActionButtonGroup } = options.helper["./ui.game.core.js"];
@@ -233,8 +234,15 @@ export function mountGame(session, options = {}) {
     function updatePlayer(delta, level) {
         player.invulnerable = Math.max(0, player.invulnerable - delta);
         player.hitFlash = Math.max(0, player.hitFlash - delta);
+        player.respawnDelay = Math.max(0, player.respawnDelay - delta);
+        if (player.pendingArrival && player.respawnDelay <= 0) {
+            player.pendingArrival = false;
+            player.respawnTimer = PLAYER_RESPAWN_SECONDS;
+            player.invulnerable = Math.max(player.invulnerable, PLAYER_RESPAWN_SECONDS + 0.85);
+            effects.push(createJumpArrival(player.x, player.y));
+        }
         player.respawnTimer = Math.max(0, player.respawnTimer - delta);
-        if (player.respawnTimer > 0) {
+        if (player.respawnDelay > 0 || player.respawnTimer > 0) {
             return;
         }
         const input = getInputVector();
@@ -431,7 +439,7 @@ export function mountGame(session, options = {}) {
     }
 
     function damagePlayer(amount, x, y) {
-        if (player.invulnerable > 0 || player.respawnTimer > 0 || done || routeClearTimer > 0) {
+        if (player.invulnerable > 0 || player.respawnDelay > 0 || player.respawnTimer > 0 || done || routeClearTimer > 0) {
             return;
         }
         damageTakenThisLevel = true;
@@ -457,10 +465,11 @@ export function mountGame(session, options = {}) {
         player.energy = PLAYER_START_ENERGY;
         player.x = respawnX;
         player.y = respawnY;
-        player.invulnerable = 2.15;
-        player.respawnTimer = PLAYER_RESPAWN_SECONDS;
+        player.invulnerable = PLAYER_RESPAWN_DELAY_SECONDS + PLAYER_RESPAWN_SECONDS + 0.85;
+        player.respawnDelay = PLAYER_RESPAWN_DELAY_SECONDS;
+        player.respawnTimer = 0;
+        player.pendingArrival = true;
         player.trailTimer = 0.08;
-        effects.push(createJumpArrival(respawnX, respawnY));
         banners.push(createBanner("Shield Reset", `${player.lives} lives left`, "#ffb15f", 1.25));
     }
 
@@ -565,7 +574,9 @@ export function mountGame(session, options = {}) {
             player.x = metrics.width * 0.18;
             player.y = metrics.height * 0.5;
             player.invulnerable = 1.15;
+            player.respawnDelay = 0;
             player.respawnTimer = PLAYER_RESPAWN_SECONDS * 0.72;
+            player.pendingArrival = false;
             effects.push(createJumpArrival(player.x, player.y));
         }
         banners.push(createBanner(`Level ${getLevel().level}`, getLevel().title, "#56d6ff", 1.3));
@@ -665,6 +676,9 @@ export function mountGame(session, options = {}) {
 
     function drawPlayer() {
         const flash = player.hitFlash > 0 || player.invulnerable > 0 && Math.floor(levelTime * 12) % 2 === 0;
+        if (player.respawnDelay > 0) {
+            return;
+        }
         const respawnProgress = player.respawnTimer > 0
             ? 1 - player.respawnTimer / PLAYER_RESPAWN_SECONDS
             : 1;
@@ -1222,7 +1236,9 @@ function createPlayer(metrics) {
         shield: PLAYER_START_SHIELD,
         invulnerable: 1.2,
         hitFlash: 0,
+        respawnDelay: 0,
         respawnTimer: 0,
+        pendingArrival: false,
         trailTimer: 0,
     };
 }
