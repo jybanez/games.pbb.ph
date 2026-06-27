@@ -63,6 +63,7 @@ const PLAYER_MAX_SHIELD = 100;
 const PLAYER_START_ENERGY = 100;
 const PLAYER_START_SHIELD = 70;
 const PLAYER_START_LIVES = 3;
+const PLAYER_RESPAWN_SECONDS = 0.9;
 
 export function mountGame(session, options = {}) {
     const { createGameLoop, createVirtualJoystick, createGameActionButtonGroup } = options.helper["./ui.game.core.js"];
@@ -230,12 +231,16 @@ export function mountGame(session, options = {}) {
     }
 
     function updatePlayer(delta, level) {
+        player.invulnerable = Math.max(0, player.invulnerable - delta);
+        player.hitFlash = Math.max(0, player.hitFlash - delta);
+        player.respawnTimer = Math.max(0, player.respawnTimer - delta);
+        if (player.respawnTimer > 0) {
+            return;
+        }
         const input = getInputVector();
         const speed = level.playerSpeed;
         player.x = clamp(player.x + input.x * speed * delta, player.radius + 5, metrics.width - player.radius - 5);
         player.y = clamp(player.y + input.y * speed * delta, player.radius + 5, metrics.height - player.radius - 5);
-        player.invulnerable = Math.max(0, player.invulnerable - delta);
-        player.hitFlash = Math.max(0, player.hitFlash - delta);
         player.trailTimer -= delta;
         if (player.trailTimer <= 0) {
             player.trailTimer = 0.045;
@@ -382,49 +387,51 @@ export function mountGame(session, options = {}) {
         hazards = hazards.filter((hazard) => hazard.health > 0);
         enemies = enemies.filter((enemy) => enemy.health > 0);
 
-        enemies.forEach((enemy) => {
-            if (circlesOverlap(player, enemy)) {
-                damagePlayer(enemy.type === "guardian" ? 42 : 34, enemy.x, enemy.y);
-                if (enemy.type !== "guardian") {
-                    enemy.health = 0;
-                    effects.push(createBurst(enemy.x, enemy.y, "#ff9fb1", 10));
+        if (player.respawnTimer <= 0) {
+            enemies.forEach((enemy) => {
+                if (circlesOverlap(player, enemy)) {
+                    damagePlayer(enemy.type === "guardian" ? 42 : 34, enemy.x, enemy.y);
+                    if (enemy.type !== "guardian") {
+                        enemy.health = 0;
+                        effects.push(createBurst(enemy.x, enemy.y, "#ff9fb1", 10));
+                    }
                 }
-            }
-        });
-        hazards.forEach((hazard) => {
-            if (circlesOverlap(player, hazard)) {
-                damagePlayer(30, hazard.x, hazard.y);
-                hazard.health = 0;
-                effects.push(createBurst(hazard.x, hazard.y, "#ff7a90", 12));
-            }
-        });
-        enemyShots.forEach((shot) => {
-            if (circlesOverlap(player, shot)) {
-                shot.life = 0;
-                damagePlayer(shot.damage, shot.x, shot.y);
-            }
-        });
-        pickups.forEach((pickup) => {
-            if (circlesOverlap(player, pickup)) {
-                pickup.collected = true;
-                if (pickup.type === "energy") {
-                    score += 25;
-                    player.energy = clamp(player.energy + 22, 0, PLAYER_MAX_ENERGY);
-                    player.shield = clamp(player.shield + 8, 0, PLAYER_MAX_SHIELD);
-                    effects.push(createText("+25 ENERGY", pickup.x, pickup.y, "#7cf0c4"));
-                } else {
-                    player.shield = clamp(player.shield + 28, 0, PLAYER_MAX_SHIELD);
-                    effects.push(createText("SHIELD", pickup.x, pickup.y, "#ffd166"));
+            });
+            hazards.forEach((hazard) => {
+                if (circlesOverlap(player, hazard)) {
+                    damagePlayer(30, hazard.x, hazard.y);
+                    hazard.health = 0;
+                    effects.push(createBurst(hazard.x, hazard.y, "#ff7a90", 12));
                 }
-                effects.push(createBurst(pickup.x, pickup.y, pickup.type === "energy" ? "#7cf0c4" : "#ffd166", 11));
-                sound?.play?.("score", { volume: 0.42 });
-            }
-        });
+            });
+            enemyShots.forEach((shot) => {
+                if (circlesOverlap(player, shot)) {
+                    shot.life = 0;
+                    damagePlayer(shot.damage, shot.x, shot.y);
+                }
+            });
+            pickups.forEach((pickup) => {
+                if (circlesOverlap(player, pickup)) {
+                    pickup.collected = true;
+                    if (pickup.type === "energy") {
+                        score += 25;
+                        player.energy = clamp(player.energy + 22, 0, PLAYER_MAX_ENERGY);
+                        player.shield = clamp(player.shield + 8, 0, PLAYER_MAX_SHIELD);
+                        effects.push(createText("+25 ENERGY", pickup.x, pickup.y, "#7cf0c4"));
+                    } else {
+                        player.shield = clamp(player.shield + 28, 0, PLAYER_MAX_SHIELD);
+                        effects.push(createText("SHIELD", pickup.x, pickup.y, "#ffd166"));
+                    }
+                    effects.push(createBurst(pickup.x, pickup.y, pickup.type === "energy" ? "#7cf0c4" : "#ffd166", 11));
+                    sound?.play?.("score", { volume: 0.42 });
+                }
+            });
+        }
         pickups = pickups.filter((pickup) => !pickup.collected);
     }
 
     function damagePlayer(amount, x, y) {
-        if (player.invulnerable > 0 || done || routeClearTimer > 0) {
+        if (player.invulnerable > 0 || player.respawnTimer > 0 || done || routeClearTimer > 0) {
             return;
         }
         damageTakenThisLevel = true;
@@ -436,15 +443,24 @@ export function mountGame(session, options = {}) {
         if (player.shield > 0) {
             return;
         }
+        const deathX = player.x;
+        const deathY = player.y;
         player.lives -= 1;
+        effects.push(createPlayerExplosion(deathX, deathY));
         if (player.lives <= 0) {
-            endGame();
+            endGame({ exploded: true });
             return;
         }
+        const respawnX = metrics.width * 0.18;
+        const respawnY = metrics.height * 0.5;
         player.shield = PLAYER_START_SHIELD;
-        player.x = metrics.width * 0.18;
-        player.y = metrics.height * 0.5;
-        player.invulnerable = 1.8;
+        player.energy = PLAYER_START_ENERGY;
+        player.x = respawnX;
+        player.y = respawnY;
+        player.invulnerable = 2.15;
+        player.respawnTimer = PLAYER_RESPAWN_SECONDS;
+        player.trailTimer = 0.08;
+        effects.push(createJumpArrival(respawnX, respawnY));
         banners.push(createBanner("Shield Reset", `${player.lives} lives left`, "#ffb15f", 1.25));
     }
 
@@ -495,10 +511,12 @@ export function mountGame(session, options = {}) {
         startLevel(levelIndex + 1);
     }
 
-    function endGame() {
+    function endGame(resultOptions = {}) {
         done = true;
         paused = false;
-        effects.push(createBurst(player.x, player.y, "#ff7a90", 30));
+        if (!resultOptions.exploded) {
+            effects.push(createPlayerExplosion(player.x, player.y));
+        }
         options.onStateChange?.("gameOver", { detail: `Score ${score}` });
         sound?.play?.("lose", { volume: 0.64 });
     }
@@ -547,6 +565,8 @@ export function mountGame(session, options = {}) {
             player.x = metrics.width * 0.18;
             player.y = metrics.height * 0.5;
             player.invulnerable = 1.15;
+            player.respawnTimer = PLAYER_RESPAWN_SECONDS * 0.72;
+            effects.push(createJumpArrival(player.x, player.y));
         }
         banners.push(createBanner(`Level ${getLevel().level}`, getLevel().title, "#56d6ff", 1.3));
         syncHud();
@@ -645,9 +665,17 @@ export function mountGame(session, options = {}) {
 
     function drawPlayer() {
         const flash = player.hitFlash > 0 || player.invulnerable > 0 && Math.floor(levelTime * 12) % 2 === 0;
+        const respawnProgress = player.respawnTimer > 0
+            ? 1 - player.respawnTimer / PLAYER_RESPAWN_SECONDS
+            : 1;
         ctx.save();
         ctx.translate(player.x, player.y);
         ctx.globalCompositeOperation = "source-over";
+        ctx.globalAlpha = player.respawnTimer > 0 ? clamp(0.25 + respawnProgress * 0.78, 0, 1) : 1;
+        ctx.scale(
+            player.respawnTimer > 0 ? clamp(0.24 + respawnProgress * 0.76, 0.24, 1) : 1,
+            player.respawnTimer > 0 ? clamp(0.72 + respawnProgress * 0.28, 0.72, 1) : 1,
+        );
         ctx.shadowColor = flash ? "#ffb15f" : "#56d6ff";
         ctx.shadowBlur = flash ? 24 : 18;
         ctx.fillStyle = flash ? "#ffe1a6" : "#dff9ff";
@@ -822,6 +850,10 @@ export function mountGame(session, options = {}) {
                 ctx.beginPath();
                 ctx.arc(effect.x, effect.y, PLAYER_RADIUS * (0.9 - progress * 0.3), 0, Math.PI * 2);
                 ctx.fill();
+            } else if (effect.type === "playerExplosion") {
+                drawPlayerExplosion(effect, progress);
+            } else if (effect.type === "jumpArrival") {
+                drawJumpArrival(effect, progress);
             } else {
                 ctx.globalAlpha = 1 - progress;
                 ctx.strokeStyle = effect.color;
@@ -844,6 +876,73 @@ export function mountGame(session, options = {}) {
             }
             ctx.restore();
         });
+    }
+
+    function drawPlayerExplosion(effect, progress) {
+        const fade = 1 - progress;
+        const coreRadius = PLAYER_RADIUS * (0.85 + progress * 2.4);
+
+        ctx.globalAlpha = fade;
+        ctx.fillStyle = "#ffd166";
+        ctx.shadowColor = "#ff7a90";
+        ctx.shadowBlur = 28;
+        ctx.beginPath();
+        ctx.arc(effect.x, effect.y, coreRadius, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.globalAlpha = fade * 0.72;
+        ctx.strokeStyle = "#ff7a90";
+        ctx.lineWidth = Math.max(2, PLAYER_RADIUS * 0.16);
+        for (let index = 0; index < 3; index += 1) {
+            ctx.beginPath();
+            ctx.arc(effect.x, effect.y, PLAYER_RADIUS * (1.2 + progress * (2.8 + index * 0.72)), 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        effect.shards.forEach((shard) => {
+            const x = effect.x + shard.x * progress;
+            const y = effect.y + shard.y * progress;
+            ctx.save();
+            ctx.globalAlpha = fade * shard.alpha;
+            ctx.translate(x, y);
+            ctx.rotate(shard.spin * progress);
+            ctx.fillStyle = shard.color;
+            ctx.fillRect(-shard.size / 2, -shard.size / 2, shard.size * 1.7, shard.size);
+            ctx.restore();
+        });
+    }
+
+    function drawJumpArrival(effect, progress) {
+        const intro = clamp(progress / 0.72, 0, 1);
+        const fade = progress > 0.82 ? 1 - clamp((progress - 0.82) / 0.18, 0, 1) : 1;
+        ctx.globalAlpha = fade;
+        ctx.shadowColor = "#56d6ff";
+        ctx.shadowBlur = 24;
+
+        effect.streaks.forEach((streak) => {
+            const startX = effect.x - streak.length * (1 - intro) - streak.offset;
+            const endX = effect.x + PLAYER_RADIUS * 1.1 * intro;
+            const y = effect.y + streak.y;
+            ctx.strokeStyle = streak.color;
+            ctx.lineWidth = streak.width;
+            ctx.beginPath();
+            ctx.moveTo(startX, y);
+            ctx.lineTo(endX, y * 0.98 + effect.y * 0.02);
+            ctx.stroke();
+        });
+
+        ctx.globalAlpha = fade * (1 - progress * 0.45);
+        ctx.strokeStyle = "#8ee7ff";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.ellipse(effect.x, effect.y, PLAYER_RADIUS * (0.8 + progress * 2.4), PLAYER_RADIUS * (0.34 + progress * 0.92), 0, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.globalAlpha = fade * 0.52;
+        ctx.fillStyle = "#f8fbff";
+        ctx.beginPath();
+        ctx.arc(effect.x, effect.y, PLAYER_RADIUS * (0.18 + intro * 0.72), 0, Math.PI * 2);
+        ctx.fill();
     }
 
     function drawBanners() {
@@ -1123,6 +1222,7 @@ function createPlayer(metrics) {
         shield: PLAYER_START_SHIELD,
         invulnerable: 1.2,
         hitFlash: 0,
+        respawnTimer: 0,
         trailTimer: 0,
     };
 }
@@ -1155,6 +1255,46 @@ function createBurst(x, y, color, count = 12) {
                 size: randomBetween(2.5, 6),
             };
         }),
+    };
+}
+
+function createPlayerExplosion(x, y) {
+    return {
+        type: "playerExplosion",
+        x,
+        y,
+        color: "#ff7a90",
+        age: 0,
+        duration: 0.86,
+        shards: Array.from({ length: 28 }, (_, index) => {
+            const angle = Math.PI * 2 * index / 28 + Math.random() * 0.18;
+            const distance = randomBetween(52, 132);
+            return {
+                x: Math.cos(angle) * distance,
+                y: Math.sin(angle) * distance * randomBetween(0.72, 1.15),
+                size: randomBetween(3, 8),
+                spin: randomBetween(-Math.PI * 2.6, Math.PI * 2.6),
+                alpha: randomBetween(0.55, 1),
+                color: index % 3 === 0 ? "#ffd166" : index % 3 === 1 ? "#ff7a90" : "#8ee7ff",
+            };
+        }),
+    };
+}
+
+function createJumpArrival(x, y) {
+    return {
+        type: "jumpArrival",
+        x,
+        y,
+        age: 0,
+        duration: PLAYER_RESPAWN_SECONDS,
+        streaks: Array.from({ length: 11 }, (_, index) => ({
+            y: (index - 5) * randomBetween(3.2, 5.4),
+            offset: randomBetween(12, 48),
+            length: randomBetween(90, 190),
+            width: randomBetween(1.5, 4.2),
+            color: index % 3 === 0 ? "#f8fbff" : index % 3 === 1 ? "#56d6ff" : "#7cf0c4",
+        })),
     };
 }
 
