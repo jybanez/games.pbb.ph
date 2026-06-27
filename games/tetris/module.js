@@ -30,6 +30,8 @@ export async function mountGame(session, options = {}) {
     let level = 1;
     let dropElapsed = 0;
     let lockElapsed = 0;
+    let clearAnimation = null;
+    let visualEffects = [];
     let running = true;
     let paused = false;
     let done = false;
@@ -74,7 +76,15 @@ export async function mountGame(session, options = {}) {
     const loop = createGameLoop({
         autoStart: false,
         update({ delta }) {
-            if (!running || paused || done) {
+            if (paused || done) {
+                return;
+            }
+            updateVisualEffects(delta);
+            if (clearAnimation) {
+                updateClearAnimation(delta);
+                return;
+            }
+            if (!running) {
                 return;
             }
             dropElapsed += delta;
@@ -131,6 +141,8 @@ export async function mountGame(session, options = {}) {
         level = 1;
         dropElapsed = 0;
         lockElapsed = 0;
+        clearAnimation = null;
+        visualEffects = [];
         running = true;
         paused = false;
         done = false;
@@ -180,7 +192,7 @@ export async function mountGame(session, options = {}) {
     }
 
     function softDrop() {
-        if (done || paused) {
+        if (done || paused || clearAnimation) {
             return;
         }
         if (movePiece(0, 1, { score: true, sound: true })) {
@@ -192,7 +204,7 @@ export async function mountGame(session, options = {}) {
     }
 
     function hardDrop() {
-        if (done || paused || !piece) {
+        if (done || paused || clearAnimation || !piece) {
             return;
         }
         let distance = 0;
@@ -207,7 +219,7 @@ export async function mountGame(session, options = {}) {
     }
 
     function movePiece(columnDelta, rowDelta, options = {}) {
-        if (done || paused || !piece) {
+        if (done || paused || clearAnimation || !piece) {
             return false;
         }
         const preview = piece.getMovePreview(columnDelta, rowDelta);
@@ -234,7 +246,7 @@ export async function mountGame(session, options = {}) {
     }
 
     function rotatePiece(direction) {
-        if (done || paused || !piece) {
+        if (done || paused || clearAnimation || !piece) {
             return false;
         }
         const accepted = piece.getWallKickTests(direction).find((test) => canPlace(test.cells));
@@ -258,10 +270,16 @@ export async function mountGame(session, options = {}) {
                 board[cell.row][cell.column] = piece.shape;
             }
         });
-        const cleared = clearLines();
-        if (cleared > 0) {
-            applyLineScore(cleared);
+        piece = null;
+        const clearResult = findCompletedLines();
+        if (clearResult.count > 0) {
+            const scoreResult = applyLineScore(clearResult.count);
             sound?.play?.("score");
+            startLineClearAnimation(clearResult.rows, clearResult.count, scoreResult);
+            showLineMilestone(clearResult.count, scoreResult);
+            syncScore();
+            draw();
+            return;
         }
         if (cells.some((cell) => cell.row < hiddenRows)) {
             endGame();
@@ -272,25 +290,142 @@ export async function mountGame(session, options = {}) {
         draw();
     }
 
-    function clearLines() {
-        let cleared = 0;
+    function completeLockAfterClear() {
+        clearLines(clearAnimation.rows);
+        clearAnimation = null;
+        if (board.slice(0, hiddenRows).some((row) => row.some(Boolean))) {
+            endGame();
+            return;
+        }
+        spawnPiece();
+        syncScore();
+        draw();
+    }
+
+    function findCompletedLines() {
+        const rows = [];
         for (let row = totalRows - 1; row >= hiddenRows; row -= 1) {
             if (!board[row].every(Boolean)) {
                 continue;
             }
-            board.splice(row, 1);
-            board.unshift(Array(columns).fill(null));
-            cleared += 1;
-            row += 1;
+            rows.push(row);
         }
-        return cleared;
+        return {
+            count: rows.length,
+            rows,
+        };
+    }
+
+    function clearLines(rows) {
+        const clearedRows = [...new Set(rows)].sort((a, b) => b - a);
+        clearedRows.forEach((row) => {
+            board.splice(row, 1);
+        });
+        clearedRows.forEach(() => {
+            board.unshift(Array(columns).fill(null));
+        });
     }
 
     function applyLineScore(cleared) {
         const lineScores = [0, 100, 300, 500, 800];
+        const previousLevel = level;
         lines += cleared;
         level = Math.floor(lines / 10) + 1;
-        score += (lineScores[cleared] || 0) * level;
+        const award = (lineScores[cleared] || 0) * level;
+        score += award;
+        return {
+            award,
+            previousLevel,
+            nextLevel: level,
+        };
+    }
+
+    function showLineMilestone(cleared, scoreResult) {
+        if (done || paused) {
+            return;
+        }
+        const leveledUp = scoreResult.nextLevel > scoreResult.previousLevel;
+        if (leveledUp) {
+            startLevelUpEffect(scoreResult.nextLevel);
+            return;
+        }
+
+    }
+
+    function startLineClearAnimation(rows, cleared, scoreResult) {
+        const colorsByClear = {
+            1: "#79d7ff",
+            2: "#54d3a5",
+            3: "#b58cff",
+            4: "#ffd166",
+        };
+        const color = colorsByClear[cleared] || "#79d7ff";
+        const topRow = Math.min(...rows);
+        const label = cleared === 4 ? "TETRIS " : "";
+        const blinkDuration = 0.45;
+        clearAnimation = {
+            rows: [...rows].sort((a, b) => a - b),
+            count: cleared,
+            color,
+            elapsed: 0,
+            blinkDuration,
+            gapDuration: 0.18,
+            collapseDuration: 0.3,
+        };
+
+        rows.forEach((row, rowIndex) => {
+            for (let index = 0; index < 18; index += 1) {
+                visualEffects.push({
+                    type: "spark",
+                    row,
+                    column: Math.random() * columns,
+                    dx: (Math.random() - 0.5) * 2.9,
+                    dy: -0.55 - Math.random() * 1.65,
+                    size: 0.09 + Math.random() * 0.12,
+                    color,
+                    age: -blinkDuration - rowIndex * 0.035,
+                    duration: 0.72 + Math.random() * 0.28,
+                });
+            }
+        });
+
+        visualEffects.push({
+            type: "floatingText",
+            row: topRow,
+            text: `${label}+${scoreResult.award}`,
+            color,
+            age: -blinkDuration * 0.8,
+            duration: 0.92,
+        });
+    }
+
+    function startLevelUpEffect(nextLevel) {
+        visualEffects.push({
+            type: "levelUp",
+            level: nextLevel,
+            color: "#ffd166",
+            age: -0.08,
+            duration: 1.55,
+        });
+    }
+
+    function updateClearAnimation(delta) {
+        clearAnimation.elapsed += delta;
+        const burstStart = clearAnimation.blinkDuration;
+        const burstEnd = burstStart + clearAnimation.gapDuration + clearAnimation.collapseDuration;
+        if (clearAnimation.elapsed >= burstEnd) {
+            completeLockAfterClear();
+        }
+    }
+
+    function updateVisualEffects(delta) {
+        if (!visualEffects.length) {
+            return;
+        }
+        visualEffects.forEach((effect) => {
+            effect.age += delta;
+        });
+        visualEffects = visualEffects.filter((effect) => effect.age < effect.duration);
     }
 
     function canPlace(cells) {
@@ -307,13 +442,13 @@ export async function mountGame(session, options = {}) {
     }
 
     function syncScore() {
-        ui.score.textContent = `Score ${score}  Lines ${lines}  Lv ${level}`;
+        ui.score.textContent = `Score ${score}`;
     }
 
     function endGame() {
         done = true;
         running = false;
-        options.onStateChange?.("gameOver", { detail: `Score ${score} | Lines ${lines}` });
+        options.onStateChange?.("gameOver");
         draw();
     }
 
@@ -357,23 +492,28 @@ export async function mountGame(session, options = {}) {
         drawBoard(layout);
         drawGhost(layout);
         drawPiece(layout);
-        drawNext(layout);
+        drawSidePanel(layout);
+        drawClearAnimation(layout);
+        drawVisualEffects(layout);
     }
 
     function getLayout() {
         const width = Math.max(240, layer.canvas.width || session.viewport.clientWidth || 360);
         const height = Math.max(320, layer.canvas.height || session.viewport.clientHeight || 640);
         const portrait = height >= width;
-        const topReserve = portrait ? clamp(height * 0.075, 48, 72) : 48;
+        const topReserve = portrait ? clamp(height * 0.1, 58, 92) : clamp(height * 0.08, 56, 76);
         const bottomReserve = portrait ? clamp(height * 0.18, 120, 164) : 88;
-        const sidePanelWidth = !portrait && width >= 700 ? clamp(width * 0.17, 116, 160) : 0;
-        const sideMargin = clamp(width * 0.045, 12, 42);
-        const availableWidth = Math.max(120, width - sideMargin * 2 - sidePanelWidth);
+        const sideMargin = clamp(width * 0.035, 10, 32);
+        const panelGap = clamp(width * 0.025, 8, 22);
+        const sidePanelWidth = clamp(width * (portrait ? 0.18 : 0.16), portrait ? 66 : 110, portrait ? 86 : 168);
+        const availableWidth = Math.max(120, width - sideMargin * 2 - panelGap - sidePanelWidth);
         const availableHeight = Math.max(180, height - topReserve - bottomReserve);
         const cellSize = Math.floor(Math.max(10, Math.min(availableWidth / columns, availableHeight / visibleRows)));
         const boardWidth = cellSize * columns;
         const boardHeight = cellSize * visibleRows;
-        const boardX = Math.round((width - sidePanelWidth - boardWidth) / 2);
+        const groupWidth = boardWidth + panelGap + sidePanelWidth;
+        const boardX = Math.round((width - groupWidth) / 2);
+        const railX = Math.round(boardX + boardWidth + panelGap);
         const boardY = Math.round(topReserve + (availableHeight - boardHeight) / 2);
 
         return {
@@ -385,6 +525,9 @@ export async function mountGame(session, options = {}) {
             boardWidth,
             boardHeight,
             sidePanelWidth,
+            panelGap,
+            railX,
+            railY: boardY,
             portrait,
         };
     }
@@ -433,7 +576,10 @@ export async function mountGame(session, options = {}) {
             for (let column = 0; column < columns; column += 1) {
                 const shape = board[row][column];
                 if (shape) {
-                    drawBlock(layout, row, column, colors[shape] || "#79a9ff", 1);
+                    if (isClearingRowHidden(row)) {
+                        continue;
+                    }
+                    drawBlock(layout, row, column, colors[shape] || "#79a9ff", 1, getClearDropOffset(row, layout));
                 }
             }
         }
@@ -462,14 +608,14 @@ export async function mountGame(session, options = {}) {
         });
     }
 
-    function drawBlock(layout, row, column, color, alpha = 1) {
+    function drawBlock(layout, row, column, color, alpha = 1, yOffset = 0) {
         const visibleRow = row - hiddenRows;
         if (visibleRow < 0 || visibleRow >= visibleRows) {
             return;
         }
         const gap = Math.max(1, Math.floor(layout.cellSize * 0.08));
         const x = layout.boardX + column * layout.cellSize + gap;
-        const y = layout.boardY + visibleRow * layout.cellSize + gap;
+        const y = layout.boardY + visibleRow * layout.cellSize + gap + yOffset;
         const size = layout.cellSize - gap * 2;
         ctx.save();
         ctx.globalAlpha = alpha;
@@ -483,33 +629,80 @@ export async function mountGame(session, options = {}) {
         ctx.restore();
     }
 
-    function drawNext(layout) {
-        if (!queue.length) {
-            return;
-        }
-        const canUseSidePanel = layout.sidePanelWidth > 0;
-        const panelX = canUseSidePanel
-            ? layout.boardX + layout.boardWidth + 24
-            : layout.boardX + layout.boardWidth - layout.cellSize * 2.7;
-        const panelY = canUseSidePanel
-            ? layout.boardY + layout.cellSize
-            : layout.boardY + layout.cellSize * 0.6;
-        const previewSize = Math.max(8, Math.floor(layout.cellSize * (canUseSidePanel ? 0.62 : 0.44)));
+    function drawSidePanel(layout) {
+        const panelX = layout.railX;
+        const panelY = layout.boardY;
+        const panelWidth = layout.sidePanelWidth;
+        const previewSize = Math.max(8, Math.floor(Math.min(layout.cellSize * 0.72, (panelWidth - 18) / 4)));
+        const panelPadding = layout.portrait ? 7 : 12;
+        const labelSize = layout.portrait ? 10 : 12;
+        const valueSize = layout.portrait ? 15 : 19;
+        const sectionGap = layout.portrait ? 12 : 18;
+        const previewBoxHeight = Math.max(previewSize * 4.5 + 24, layout.portrait ? 72 : 100);
+        const statsY = panelY + previewBoxHeight + sectionGap;
 
         ctx.save();
-        ctx.globalAlpha = canUseSidePanel ? 1 : 0.86;
-        ctx.fillStyle = "rgba(7, 16, 29, .68)";
+        drawPanelBox(panelX, panelY, panelWidth, previewBoxHeight);
+        drawPanelLabel("Next", panelX + panelPadding, panelY + panelPadding + labelSize / 2, labelSize);
+        if (queue.length) {
+            const shapeX = panelX + (panelWidth - previewSize * 4) / 2;
+            const shapeY = panelY + panelPadding + labelSize + 12;
+            drawMiniShape(queue[0], shapeX, shapeY, previewSize);
+        }
+
+        drawStatBlock({
+            x: panelX,
+            y: statsY,
+            width: panelWidth,
+            label: "Lines",
+            value: lines,
+            labelSize,
+            valueSize,
+            padding: panelPadding,
+        });
+        drawStatBlock({
+            x: panelX,
+            y: statsY + (layout.portrait ? 48 : 60),
+            width: panelWidth,
+            label: "Level",
+            value: level,
+            labelSize,
+            valueSize,
+            padding: panelPadding,
+        });
+        ctx.restore();
+    }
+
+    function drawPanelBox(x, y, width, height) {
+        ctx.fillStyle = "rgba(7, 16, 29, .64)";
         ctx.strokeStyle = "rgba(126, 155, 205, .22)";
         ctx.lineWidth = 1;
-        ctx.fillRect(panelX - 10, panelY - 24, previewSize * 4.6, previewSize * 4.9);
-        ctx.strokeRect(panelX - 10, panelY - 24, previewSize * 4.6, previewSize * 4.9);
+        ctx.fillRect(x, y, width, height);
+        ctx.strokeRect(x, y, width, height);
+    }
+
+    function drawPanelLabel(text, x, y, fontSize) {
         ctx.fillStyle = "#b2c2e5";
-        ctx.font = `700 ${Math.max(10, Math.floor(previewSize * 0.58))}px Segoe UI, sans-serif`;
+        ctx.font = `800 ${fontSize}px Segoe UI, sans-serif`;
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
-        ctx.fillText("Next", panelX, panelY - 10);
-        drawMiniShape(queue[0], panelX, panelY + previewSize * 0.7, previewSize);
-        ctx.restore();
+        ctx.fillText(text, x, y);
+    }
+
+    function drawStatBlock({ x, y, width, label, value, labelSize, valueSize, padding }) {
+        const labelValueGap = Math.max(5, Math.floor(padding * 0.75));
+        const height = Math.max(46, valueSize + labelSize + padding * 2 + labelValueGap);
+        drawPanelBox(x, y, width, height);
+        ctx.fillStyle = "#8fa2c5";
+        ctx.font = `800 ${labelSize}px Segoe UI, sans-serif`;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        const labelY = y + padding + labelSize / 2;
+        ctx.fillText(label, x + padding, labelY);
+        ctx.fillStyle = "#eaf2ff";
+        ctx.font = `900 ${valueSize}px Segoe UI, sans-serif`;
+        ctx.textAlign = "center";
+        ctx.fillText(String(value), x + width / 2, labelY + labelSize / 2 + labelValueGap + valueSize / 2);
     }
 
     function drawMiniShape(shape, x, y, size) {
@@ -523,6 +716,187 @@ export async function mountGame(session, options = {}) {
             ctx.fillStyle = colors[shape] || "#79a9ff";
             ctx.fillRect(px + 1, py + 1, size - 2, size - 2);
         });
+    }
+
+    function drawClearAnimation(layout) {
+        if (!clearAnimation) {
+            return;
+        }
+        const blinkProgress = clamp(clearAnimation.elapsed / clearAnimation.blinkDuration, 0, 1);
+        if (blinkProgress >= 1) {
+            drawClearGapPulse(layout);
+            return;
+        }
+
+        const pulse = 0.5 + Math.sin(blinkProgress * Math.PI * 7) * 0.5;
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        clearAnimation.rows.forEach((row) => {
+            const visibleRow = row - hiddenRows;
+            const y = layout.boardY + visibleRow * layout.cellSize;
+            ctx.globalAlpha = 0.28 + pulse * 0.46;
+            ctx.fillStyle = clearAnimation.color;
+            ctx.fillRect(layout.boardX, y, layout.boardWidth, layout.cellSize);
+            ctx.globalAlpha = 0.3 + pulse * 0.58;
+            ctx.strokeStyle = "#ffffff";
+            ctx.lineWidth = Math.max(2, layout.cellSize * 0.08);
+            ctx.strokeRect(layout.boardX + 1, y + 1, layout.boardWidth - 2, layout.cellSize - 2);
+        });
+        ctx.restore();
+    }
+
+    function drawClearGapPulse(layout) {
+        const burstElapsed = clearAnimation.elapsed - clearAnimation.blinkDuration;
+        const progress = clamp(burstElapsed / (clearAnimation.gapDuration + clearAnimation.collapseDuration), 0, 1);
+        const alpha = Math.max(0, 1 - progress);
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = alpha * 0.28;
+        ctx.fillStyle = clearAnimation.color;
+        clearAnimation.rows.forEach((row) => {
+            const visibleRow = row - hiddenRows;
+            const y = layout.boardY + visibleRow * layout.cellSize;
+            ctx.fillRect(layout.boardX, y, layout.boardWidth, layout.cellSize);
+        });
+        ctx.restore();
+    }
+
+    function isClearingRowHidden(row) {
+        return !!clearAnimation
+            && clearAnimation.elapsed >= clearAnimation.blinkDuration
+            && clearAnimation.rows.includes(row);
+    }
+
+    function getClearDropOffset(row, layout) {
+        if (!clearAnimation || clearAnimation.elapsed < clearAnimation.blinkDuration + clearAnimation.gapDuration) {
+            return 0;
+        }
+        const rowsBelow = clearAnimation.rows.filter((clearedRow) => clearedRow > row).length;
+        if (!rowsBelow) {
+            return 0;
+        }
+        const rawProgress = (clearAnimation.elapsed - clearAnimation.blinkDuration - clearAnimation.gapDuration) / clearAnimation.collapseDuration;
+        const progress = 1 - Math.pow(1 - clamp(rawProgress, 0, 1), 3);
+        return rowsBelow * layout.cellSize * progress;
+    }
+
+    function drawVisualEffects(layout) {
+        if (!visualEffects.length) {
+            return;
+        }
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        visualEffects.forEach((effect) => {
+            if (effect.age < 0) {
+                return;
+            }
+            if (effect.type === "spark") {
+                drawSpark(layout, effect);
+            }
+            if (effect.type === "floatingText") {
+                drawFloatingText(layout, effect);
+            }
+            if (effect.type === "levelUp") {
+                drawLevelUpEffect(layout, effect);
+            }
+        });
+        ctx.restore();
+    }
+
+    function drawSpark(layout, effect) {
+        const progress = clamp(effect.age / effect.duration, 0, 1);
+        const visibleRow = effect.row - hiddenRows;
+        const x = layout.boardX + (effect.column + 0.5 + effect.dx * progress) * layout.cellSize;
+        const y = layout.boardY + (visibleRow + 0.5 + effect.dy * progress + progress * progress * 0.8) * layout.cellSize;
+        const radius = Math.max(2, layout.cellSize * effect.size * (1 - progress * 0.45));
+
+        ctx.save();
+        ctx.globalAlpha = (1 - progress) * 0.9;
+        ctx.fillStyle = effect.color;
+        ctx.shadowColor = effect.color;
+        ctx.shadowBlur = Math.max(6, layout.cellSize * 0.4);
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+
+    function drawFloatingText(layout, effect) {
+        const progress = clamp(effect.age / effect.duration, 0, 1);
+        const visibleRow = effect.row - hiddenRows;
+        const x = layout.boardX + layout.boardWidth / 2;
+        const y = layout.boardY + visibleRow * layout.cellSize - 10 - progress * layout.cellSize * 1.15;
+
+        ctx.save();
+        ctx.globalAlpha = 1 - progress;
+        ctx.fillStyle = "#eaf2ff";
+        ctx.strokeStyle = "rgba(7, 16, 32, 0.72)";
+        ctx.lineWidth = Math.max(4, layout.cellSize * 0.12);
+        ctx.shadowColor = effect.color;
+        ctx.shadowBlur = 22;
+        ctx.font = `900 ${Math.max(32, Math.floor(layout.cellSize * 1.15))}px Segoe UI, sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.strokeText(effect.text, x, y);
+        ctx.fillText(effect.text, x, y);
+        ctx.restore();
+    }
+
+    function drawLevelUpEffect(layout, effect) {
+        const progress = clamp(effect.age / effect.duration, 0, 1);
+        const intro = clamp(progress / 0.18, 0, 1);
+        const fade = progress > 0.78 ? 1 - clamp((progress - 0.78) / 0.22, 0, 1) : 1;
+        const centerX = layout.boardX + layout.boardWidth / 2;
+        const centerY = layout.boardY + layout.boardHeight * 0.34;
+        const ringRadius = layout.boardWidth * (0.13 + progress * 0.46);
+        const burstCount = 24;
+
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = fade;
+        ctx.strokeStyle = effect.color;
+        ctx.lineWidth = Math.max(2, layout.cellSize * 0.08);
+        ctx.shadowColor = effect.color;
+        ctx.shadowBlur = Math.max(18, layout.cellSize * 0.9);
+
+        for (let index = 0; index < 3; index += 1) {
+            ctx.globalAlpha = fade * (0.42 - index * 0.1);
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, ringRadius + index * layout.cellSize * 0.45, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        for (let index = 0; index < burstCount; index += 1) {
+            const angle = (Math.PI * 2 * index) / burstCount;
+            const sparkProgress = clamp((progress - 0.1) / 0.76, 0, 1);
+            const distance = layout.boardWidth * (0.08 + sparkProgress * 0.44);
+            const x = centerX + Math.cos(angle) * distance;
+            const y = centerY + Math.sin(angle) * distance * 0.68;
+            const radius = Math.max(2, layout.cellSize * 0.09 * (1 - sparkProgress * 0.45));
+            ctx.globalAlpha = fade * (1 - sparkProgress * 0.72);
+            ctx.fillStyle = index % 3 === 0 ? "#54d3a5" : effect.color;
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        const scale = 0.84 + intro * 0.16 + Math.sin(progress * Math.PI) * 0.04;
+        ctx.globalAlpha = fade;
+        ctx.translate(centerX, centerY);
+        ctx.scale(scale, scale);
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.lineWidth = Math.max(5, layout.cellSize * 0.15);
+        ctx.strokeStyle = "rgba(7, 16, 32, .82)";
+        ctx.fillStyle = "#f8fbff";
+        ctx.font = `900 ${Math.max(30, Math.floor(layout.cellSize * 1.35))}px Segoe UI, sans-serif`;
+        ctx.strokeText("LEVEL UP", 0, 0);
+        ctx.fillText("LEVEL UP", 0, 0);
+        ctx.fillStyle = effect.color;
+        ctx.font = `900 ${Math.max(20, Math.floor(layout.cellSize * 0.9))}px Segoe UI, sans-serif`;
+        ctx.strokeText(`LEVEL ${effect.level}`, 0, layout.cellSize * 1.18);
+        ctx.fillText(`LEVEL ${effect.level}`, 0, layout.cellSize * 1.18);
+        ctx.restore();
     }
 
     function getDropDistance() {

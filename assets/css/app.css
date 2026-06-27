@@ -276,6 +276,15 @@ a {
     max-width: min(42vw, 220px);
 }
 
+.pbb-tetris-session-ui .pbb-game-session-score {
+    min-height: 38px;
+    padding: 0 18px;
+    font-size: clamp(16px, 3.6vmin, 26px);
+    font-weight: 900;
+    letter-spacing: 0;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, .2);
+}
+
 .pbb-tetris-session-actions .ui-game-action-group {
     grid-template-columns: repeat(2, 52px);
     gap: 10px;
