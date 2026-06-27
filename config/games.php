@@ -9,7 +9,6 @@ return [
     'show_local_games' => true,
     'landing_url' => 'https://pbb.ph',
     'hotline_url' => 'https://hotline.pbb.ph',
-    'version' => '0.1.0',
+    'version' => '0.2.0',
     'emergency_message' => 'Games are temporarily disabled to prioritize emergency services. Please use PBB Hotline or return to the PBB Local Hub.',
 ];
-

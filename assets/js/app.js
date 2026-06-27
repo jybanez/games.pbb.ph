@@ -7,6 +7,7 @@ const helperUiBundleModules = {
 };
 
 const state = JSON.parse(document.getElementById("appState")?.textContent || "{}");
+const assetVersion = String(state.assetVersion || "").trim();
 const { createNavbar } = helperUiBundleModules["./ui.navbar.js"];
 const { createIconGrid } = helperUiBundleModules["./ui.icon.grid.js"];
 const { createEmptyState } = helperUiBundleModules["./ui.empty.state.js"];
@@ -312,7 +313,7 @@ async function launchGame(game) {
 
     try {
         await loadGameAssets(game);
-        const module = await import(game.module);
+        const module = await import(withAssetVersion(game.module));
         if (typeof module.mountGame !== "function") {
             throw new Error(`Game module ${game.module} must export mountGame(session, options).`);
         }
@@ -739,6 +740,13 @@ function preloadAssets(paths) {
             }
         });
     }));
+}
+
+function withAssetVersion(path) {
+    if (!path || !assetVersion || /^(https?:)?\/\//.test(path) || /[?&]v=/.test(path)) {
+        return path;
+    }
+    return `${path}${path.includes("?") ? "&" : "?"}v=${encodeURIComponent(assetVersion)}`;
 }
 
 function renderGameLoadError(session, game, error) {

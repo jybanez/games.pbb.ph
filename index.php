@@ -17,14 +17,55 @@ $categoryLabels = [
     'local' => 'Local / Barangay Games',
 ];
 
+function asset_url($path, array $config)
+{
+    $value = (string)$path;
+    if ($value === '' || preg_match('/^(https?:)?\/\//', $value)) {
+        return $value;
+    }
+
+    $version = isset($config['version']) ? (string)$config['version'] : '';
+    if ($version === '') {
+        return $value;
+    }
+
+    $separator = strpos($value, '?') === false ? '?' : '&';
+    return $value . $separator . 'v=' . rawurlencode($version);
+}
+
+function version_game_asset_urls(array $games, array $config)
+{
+    return array_map(function (array $game) use ($config) {
+        foreach (['module', 'icon_image'] as $field) {
+            if (!empty($game[$field])) {
+                $game[$field] = asset_url($game[$field], $config);
+            }
+        }
+        foreach (['styles', 'assets'] as $field) {
+            if (!empty($game[$field]) && is_array($game[$field])) {
+                $game[$field] = array_map(function ($path) use ($config) {
+                    return asset_url($path, $config);
+                }, $game[$field]);
+            }
+        }
+        foreach (['splash_image', 'home_image'] as $field) {
+            if (!empty($game['launch'][$field])) {
+                $game['launch'][$field] = asset_url($game['launch'][$field], $config);
+            }
+        }
+        return $game;
+    }, $games);
+}
+
 $appState = [
     'mode' => $mode,
     'enabled' => isset($config['enabled']) ? (bool)$config['enabled'] : true,
+    'assetVersion' => isset($config['version']) ? (string)$config['version'] : '',
     'landingUrl' => isset($config['landing_url']) ? (string)$config['landing_url'] : 'https://pbb.ph',
     'hotlineUrl' => isset($config['hotline_url']) ? (string)$config['hotline_url'] : 'https://hotline.pbb.ph',
     'categories' => $categoryLabels,
     'counts' => ['all' => count($visibleGames)] + $counts,
-    'games' => $visibleGames,
+    'games' => version_game_asset_urls($visibleGames, $config),
 ];
 
 function e($value)
@@ -39,12 +80,12 @@ function e($value)
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#0d1523">
     <title>PBB Games Corner</title>
-    <link rel="manifest" href="/manifest.json">
-    <link rel="icon" type="image/png" href="/assets/launcher/app-icon.png">
-    <link rel="apple-touch-icon" href="/assets/launcher/app-icon.png">
-    <link rel="stylesheet" href="/assets/helper/helpers.ui.bundle.min.css">
-    <link rel="stylesheet" href="/assets/helper/helpers.game.bundle.min.css">
-    <link rel="stylesheet" href="/assets/css/app.css">
+    <link rel="manifest" href="<?= e(asset_url('/manifest.json', $config)) ?>">
+    <link rel="icon" type="image/png" href="<?= e(asset_url('/assets/launcher/app-icon.png', $config)) ?>">
+    <link rel="apple-touch-icon" href="<?= e(asset_url('/assets/launcher/app-icon.png', $config)) ?>">
+    <link rel="stylesheet" href="<?= e(asset_url('/assets/helper/helpers.ui.bundle.min.css', $config)) ?>">
+    <link rel="stylesheet" href="<?= e(asset_url('/assets/helper/helpers.game.bundle.min.css', $config)) ?>">
+    <link rel="stylesheet" href="<?= e(asset_url('/assets/css/app.css', $config)) ?>">
 </head>
 <body class="pbb-games-app" data-mode="<?= e($mode) ?>">
     <div id="navbarHost" class="pbb-navbar-host"></div>
@@ -71,7 +112,7 @@ function e($value)
     </main>
     <div id="gameSessionHost" class="pbb-game-session-host" aria-live="polite"></div>
     <script id="appState" type="application/json"><?= json_encode($appState, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?></script>
-    <script type="module" src="/assets/helper/helpers.game.bundle.min.js"></script>
-    <script type="module" src="/assets/js/app.js"></script>
+    <script type="module" src="<?= e(asset_url('/assets/helper/helpers.game.bundle.min.js', $config)) ?>"></script>
+    <script type="module" src="<?= e(asset_url('/assets/js/app.js', $config)) ?>"></script>
 </body>
 </html>
