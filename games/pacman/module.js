@@ -19,7 +19,6 @@ const PATROL_PHASES = [
     { mode: "chase", duration: 18 },
 ];
 
-const PATROL_LIMIT = 4;
 const PATROL_COLORS = ["#ff7a90", "#ffb15f", "#7dd7ff", "#c18cff"];
 const PATROL_SCATTER_TARGETS = [
     { row: 1, column: 17 },
@@ -52,10 +51,46 @@ const MAZE_MAP = [
     "###################",
 ];
 
+const LEVEL_DEFINITIONS = [
+    {
+        id: "route-alpha",
+        level: 1,
+        title: "Route Alpha",
+        objective: "Collect every supply marker and keep the route open.",
+        map: MAZE_MAP,
+        lives: 3,
+        playerSpeed: 4.4,
+        patrolLimit: 4,
+        patrolSpeedBase: 3.25,
+        patrolSpeedStep: 0.16,
+        powerDuration: 7,
+        supplyValue: 10,
+        powerValue: 50,
+        clearBonus: 500,
+        safetyDuration: 2.4,
+        respawnSafetyDuration: 1.8,
+    },
+    {
+        id: "route-bravo",
+        level: 2,
+        title: "Route Bravo",
+        objective: "Clear the same route with tighter patrol timing.",
+        map: MAZE_MAP,
+        lives: 3,
+        playerSpeed: 4.55,
+        patrolLimit: 4,
+        patrolSpeedBase: 3.42,
+        patrolSpeedStep: 0.18,
+        powerDuration: 6.2,
+        supplyValue: 12,
+        powerValue: 60,
+        clearBonus: 800,
+        safetyDuration: 2.1,
+        respawnSafetyDuration: 1.55,
+    },
+];
+
 const PATROL_BASE_TILES = new Set(["B", "D", "G"]);
-const PATROL_BASE_CELLS = MAZE_MAP.flatMap((rowText, row) => [...rowText]
-    .map((tile, column) => ({ row, column, tile }))
-    .filter((cell) => PATROL_BASE_TILES.has(cell.tile)));
 
 const TILE_DEFINITIONS = {
     "#": { type: "wall", enterable: false },
@@ -68,6 +103,20 @@ const TILE_DEFINITIONS = {
     " ": { type: "path" },
 };
 
+function getLevelTileDefinitions(level) {
+    return {
+        ...TILE_DEFINITIONS,
+        ".": { ...TILE_DEFINITIONS["."], collectible: { type: "supply", value: level.supplyValue } },
+        "o": { ...TILE_DEFINITIONS.o, collectible: { type: "power", value: level.powerValue } },
+    };
+}
+
+function getPatrolBaseCells(map) {
+    return map.flatMap((rowText, row) => [...rowText]
+        .map((tile, column) => ({ row, column, tile }))
+        .filter((cell) => PATROL_BASE_TILES.has(cell.tile)));
+}
+
 export async function mountGame(session, options = {}) {
     const { createGameLoop, createTouchControlPad } = options.helper["./ui.game.core.js"];
     const { createGridMaze, createGridMover, createGridPathfinder } = options.helper["./ui.game.grid.js"];
@@ -76,19 +125,13 @@ export async function mountGame(session, options = {}) {
     const ui = createShell(session, options.game || { title: "Supply Run" });
     const sound = options.sound;
 
-    const maze = createGridMaze({
-        map: MAZE_MAP,
-        tiles: TILE_DEFINITIONS,
-        cellSize: 1,
-    });
-    const pathfinder = createGridPathfinder({
-        rows: maze.rows,
-        columns: maze.columns,
-        canEnter: (row, column) => maze.canEnter(row, column),
-    });
-    const playerSpawn = maze.points.playerSpawn || { row: 1, column: 1 };
-    const patrolSpawns = maze.getPoints("patrolSpawn");
-
+    let levelIndex = 0;
+    let currentLevel = LEVEL_DEFINITIONS[levelIndex];
+    let maze = null;
+    let pathfinder = null;
+    let playerSpawn = null;
+    let patrolSpawns = [];
+    let patrolBaseCells = [];
     let player = null;
     let patrols = [];
     let supplies = new Map();
@@ -106,7 +149,9 @@ export async function mountGame(session, options = {}) {
     let feedbacks = [];
     let banners = [];
     let bursts = [];
+    let routeTraces = [];
     let routeMilestoneIndex = -1;
+    let levelClearTimer = 0;
     let lifeFlash = 0;
     let running = true;
     let paused = false;
@@ -137,9 +182,19 @@ export async function mountGame(session, options = {}) {
     const loop = createGameLoop({
         autoStart: false,
         update({ delta }) {
+            if (paused) {
+                return;
+            }
             pulseTime += delta;
             updateFeedback(delta);
-            if (!running || paused || done) {
+            if (done) {
+                return;
+            }
+            if (levelClearTimer > 0) {
+                update(delta);
+                return;
+            }
+            if (!running) {
                 return;
             }
             update(delta);
@@ -181,12 +236,35 @@ export async function mountGame(session, options = {}) {
     };
 
     function reset() {
+        levelIndex = 0;
         score = 0;
-        lives = 3;
+        startLevel(levelIndex, { resetScore: false, announce: false });
+    }
+
+    function startLevel(nextLevelIndex, { resetScore = false, announce = true } = {}) {
+        currentLevel = LEVEL_DEFINITIONS[nextLevelIndex] || LEVEL_DEFINITIONS[LEVEL_DEFINITIONS.length - 1];
+        levelIndex = Math.min(nextLevelIndex, LEVEL_DEFINITIONS.length - 1);
+        maze = createGridMaze({
+            map: currentLevel.map,
+            tiles: getLevelTileDefinitions(currentLevel),
+            cellSize: 1,
+        });
+        pathfinder = createGridPathfinder({
+            rows: maze.rows,
+            columns: maze.columns,
+            canEnter: (row, column) => maze.canEnter(row, column),
+        });
+        playerSpawn = maze.points.playerSpawn || { row: 1, column: 1 };
+        patrolSpawns = maze.getPoints("patrolSpawn");
+        patrolBaseCells = getPatrolBaseCells(currentLevel.map);
+        if (resetScore) {
+            score = 0;
+        }
+        lives = currentLevel.lives;
         powerTimer = 0;
         powerCatchStreak = 0;
         powerWarningShown = false;
-        safetyTimer = 2.4;
+        safetyTimer = currentLevel.safetyDuration;
         patrolPhaseIndex = 0;
         patrolPhaseTimer = PATROL_PHASES[0].duration;
         respawnTimer = 0;
@@ -194,7 +272,9 @@ export async function mountGame(session, options = {}) {
         feedbacks = [];
         banners = [];
         bursts = [];
+        routeTraces = [];
         routeMilestoneIndex = -1;
+        levelClearTimer = 0;
         lifeFlash = 0;
         running = true;
         paused = false;
@@ -204,17 +284,21 @@ export async function mountGame(session, options = {}) {
         resetActors();
         options.onStateChange?.("playing");
         syncScore();
+        if (announce) {
+            showBanner(`Level ${currentLevel.level}`, currentLevel.title, "#79d7ff", 1.05);
+            sound?.play?.("select", { volume: 0.42 });
+        }
         draw();
     }
 
     function resetActors() {
         resetPlayer();
-        patrols = (patrolSpawns.length ? patrolSpawns : [{ row: 1, column: maze.columns - 2 }]).slice(0, PATROL_LIMIT).map((spawn, index) => {
+        patrols = (patrolSpawns.length ? patrolSpawns : [{ row: 1, column: maze.columns - 2 }]).slice(0, currentLevel.patrolLimit).map((spawn, index) => {
             const mover = createGridMover({
                 row: spawn.row,
                 column: spawn.column,
                 direction: index % 2 === 0 ? "left" : "right",
-                speed: 3.25 + index * 0.16,
+                speed: currentLevel.patrolSpeedBase + index * currentLevel.patrolSpeedStep,
                 cellSize: 1,
                 canEnter: (row, column) => maze.canEnter(row, column),
             });
@@ -237,7 +321,7 @@ export async function mountGame(session, options = {}) {
             row: playerSpawn.row,
             column: playerSpawn.column,
             direction: "right",
-            speed: 4.4,
+            speed: currentLevel.playerSpeed,
             cellSize: 1,
             preTurnTolerance: 0.18,
             canEnter: (row, column) => maze.canEnter(row, column),
@@ -251,15 +335,26 @@ export async function mountGame(session, options = {}) {
             respawnTimer = Math.max(0, respawnTimer - delta);
             return;
         }
+        if (levelClearTimer > 0) {
+            levelClearTimer = Math.max(0, levelClearTimer - delta);
+            if (levelClearTimer <= 0) {
+                completeRouteClear();
+            }
+            return;
+        }
         if (powerTimer > 0) {
             const previousPowerTimer = powerTimer;
             powerTimer = Math.max(0, powerTimer - delta);
             if (powerTimer <= 0) {
                 powerCatchStreak = 0;
                 powerWarningShown = false;
+                syncScore();
             } else if (!powerWarningShown && previousPowerTimer > 2 && powerTimer <= 2) {
                 powerWarningShown = true;
                 showBanner("Power Fading", "Avoid patrol contact", "#ffd166", 0.9);
+                syncScore();
+            } else if (Math.ceil(previousPowerTimer) !== Math.ceil(powerTimer)) {
+                syncScore();
             }
         }
         safetyTimer = Math.max(0, safetyTimer - delta);
@@ -298,7 +393,7 @@ export async function mountGame(session, options = {}) {
         addFeedback(`+${item.value}`, item, item.type === "power" ? "#fff1a8" : "#dfffea");
         addBurst(item, item.type === "power" ? "#ffd166" : "#54d3a5", item.type === "power" ? 18 : 10);
         if (item.type === "power") {
-            powerTimer = 7;
+            powerTimer = currentLevel.powerDuration;
             powerCatchStreak = 0;
             powerWarningShown = false;
             showBanner("Power Kit", "Patrols are vulnerable", "#ffd166", 1.05);
@@ -307,7 +402,7 @@ export async function mountGame(session, options = {}) {
         syncScore();
         checkRouteMilestone();
         if (![...supplies.values()].some((supply) => supply.type === "supply")) {
-            winGame();
+            beginRouteClear();
         }
     }
 
@@ -490,18 +585,38 @@ export async function mountGame(session, options = {}) {
             return;
         }
         respawnTimer = 1.2;
-        safetyTimer = 1.8;
+        safetyTimer = currentLevel.respawnSafetyDuration;
         resetPlayer();
         showBanner("Runner Reset", `${lives} lives left`, "#ffb15f", 0.95);
         syncScore();
     }
 
-    function winGame() {
+    function beginRouteClear() {
+        if (levelClearTimer > 0 || done) {
+            return;
+        }
+        levelClearTimer = 1.35;
+        running = false;
+        powerTimer = 0;
+        const award = currentLevel.clearBonus;
+        score += award;
+        routeTraces = createRouteTraces();
+        syncScore();
+        showBanner("Route Clear", `+${award} | ${currentLevel.title}`, "#54d3a5", 1.35);
+        sound?.play?.("win", { volume: 0.58 });
+    }
+
+    function completeRouteClear() {
+        const hasNextLevel = levelIndex + 1 < LEVEL_DEFINITIONS.length;
+        if (hasNextLevel) {
+            startLevel(levelIndex + 1, { resetScore: false, announce: true });
+            return;
+        }
         done = true;
         running = false;
         syncScore();
-        showBanner("Route Cleared", `Score ${score}`, "#54d3a5", 1.45);
-        options.onStateChange?.("won", { title: "Route Cleared", detail: `Score ${score}` });
+        showBanner("Mission Complete", `Score ${score}`, "#54d3a5", 1.45);
+        options.onStateChange?.("won", { title: "Mission Complete", detail: `Score ${score}` });
     }
 
     function handleKeydown(event) {
@@ -523,29 +638,31 @@ export async function mountGame(session, options = {}) {
             row: item.row,
             column: item.column,
             type: item.type,
-            value: Number(item.value) || (item.type === "power" ? 50 : 10),
+            value: Number(item.value) || (item.type === "power" ? currentLevel.powerValue : currentLevel.supplyValue),
         }]));
     }
 
     function syncScore() {
         const progress = getRouteProgress();
-        ui.score.textContent = `Score ${score}  Lives ${lives}  Route ${Math.round(progress * 100)}%`;
+        const suppliesRemaining = countSupplyMarkers();
+        const powerLabel = powerTimer > 0 ? `  Power ${Math.ceil(powerTimer)}s` : "";
+        ui.score.textContent = `Score ${score}  Lv ${currentLevel.level}  Lives ${lives}  Supplies ${suppliesRemaining}${powerLabel}`;
         options.onProgress?.({
             type: "progress:update",
             progress: {
                 gameId: "pacman",
                 mode: "supply-run",
                 scheme: "challenge",
-                level: 1,
-                levelId: "central-route",
-                levelName: "Central Route",
+                level: currentLevel.level,
+                levelId: currentLevel.id,
+                levelName: currentLevel.title,
                 difficulty: lives >= 3 ? "easy" : lives === 2 ? "normal" : "hard",
-                objective: "Collect every supply marker and avoid patrol hazards",
+                objective: currentLevel.objective,
                 score,
                 lives,
-                progressCurrent: Math.round(progress * totalSupplies),
+                progressCurrent: totalSupplies - suppliesRemaining,
                 progressTarget: totalSupplies,
-                progressLabel: `Route ${Math.round(progress * 100)}%`,
+                progressLabel: `Supplies ${suppliesRemaining} remaining`,
             },
         });
     }
@@ -560,6 +677,7 @@ export async function mountGame(session, options = {}) {
         drawPatrolBase(layout);
         drawSupplies(layout);
         drawRouteProgress(layout);
+        drawRouteTraces(layout);
         drawBursts(layout);
         patrols.forEach((patrol) => drawPatrol(layout, patrol));
         drawDangerLinks(layout);
@@ -667,13 +785,13 @@ export async function mountGame(session, options = {}) {
     }
 
     function drawPatrolBase(layout) {
-        if (!PATROL_BASE_CELLS.length) {
+        if (!patrolBaseCells.length) {
             return;
         }
-        const minRow = Math.min(...PATROL_BASE_CELLS.map((cell) => cell.row));
-        const maxRow = Math.max(...PATROL_BASE_CELLS.map((cell) => cell.row));
-        const minColumn = Math.min(...PATROL_BASE_CELLS.map((cell) => cell.column));
-        const maxColumn = Math.max(...PATROL_BASE_CELLS.map((cell) => cell.column));
+        const minRow = Math.min(...patrolBaseCells.map((cell) => cell.row));
+        const maxRow = Math.max(...patrolBaseCells.map((cell) => cell.row));
+        const minColumn = Math.min(...patrolBaseCells.map((cell) => cell.column));
+        const maxColumn = Math.max(...patrolBaseCells.map((cell) => cell.column));
         const inset = Math.max(2, layout.cellSize * 0.1);
         const x = layout.boardX + minColumn * layout.cellSize + inset;
         const y = layout.boardY + minRow * layout.cellSize + inset;
@@ -689,7 +807,7 @@ export async function mountGame(session, options = {}) {
         roundRect(x, y, width, height, Math.max(3, layout.cellSize * 0.16));
         ctx.stroke();
 
-        PATROL_BASE_CELLS.forEach((cell) => {
+        patrolBaseCells.forEach((cell) => {
             const cellX = layout.boardX + cell.column * layout.cellSize;
             const cellY = layout.boardY + cell.row * layout.cellSize;
             if (cell.tile === "D") {
@@ -890,7 +1008,7 @@ export async function mountGame(session, options = {}) {
     }
 
     function drawDangerLinks(layout) {
-        if (!player || respawnTimer > 0) {
+        if (!player || respawnTimer > 0 || levelClearTimer > 0) {
             return;
         }
         const playerState = player.getState();
@@ -993,6 +1111,31 @@ export async function mountGame(session, options = {}) {
         });
     }
 
+    function drawRouteTraces(layout) {
+        if (!routeTraces.length) {
+            return;
+        }
+        routeTraces.forEach((trace) => {
+            if (trace.age < 0) {
+                return;
+            }
+            const progress = clamp(trace.age / trace.duration, 0, 1);
+            const center = worldToScreen(layout, trace.column + 0.5, trace.row + 0.5);
+            const radius = layout.cellSize * (0.12 + progress * 0.42);
+            ctx.save();
+            ctx.globalCompositeOperation = "lighter";
+            ctx.globalAlpha = (1 - progress) * trace.alpha;
+            ctx.strokeStyle = "#54d3a5";
+            ctx.lineWidth = Math.max(2, layout.cellSize * 0.08);
+            ctx.shadowColor = "#54d3a5";
+            ctx.shadowBlur = Math.max(10, layout.cellSize * 0.6);
+            ctx.beginPath();
+            ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+        });
+    }
+
     function drawBanners(layout) {
         banners.forEach((banner) => {
             const progress = clamp(banner.age / banner.duration, 0, 1);
@@ -1072,6 +1215,9 @@ export async function mountGame(session, options = {}) {
         bursts = bursts
             .map((burst) => ({ ...burst, age: burst.age + delta }))
             .filter((burst) => burst.age < burst.duration);
+        routeTraces = routeTraces
+            .map((trace) => ({ ...trace, age: trace.age + delta }))
+            .filter((trace) => trace.age < trace.duration);
         lifeFlash = Math.max(0, lifeFlash - delta);
     }
 
@@ -1132,6 +1278,18 @@ export async function mountGame(session, options = {}) {
 
     function countSupplyMarkers() {
         return [...supplies.values()].filter((item) => item.type === "supply").length;
+    }
+
+    function createRouteTraces() {
+        return maze.collectibles
+            .filter((item) => item.type === "supply")
+            .map((item, index) => ({
+                row: item.row,
+                column: item.column,
+                age: -index * 0.012,
+                duration: 0.95,
+                alpha: 0.62,
+            }));
     }
 
     function worldToScreen(layout, x, y) {
