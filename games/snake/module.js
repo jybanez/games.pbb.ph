@@ -133,7 +133,9 @@ export async function mountGame(session, options = {}) {
                     title: `Level ${currentLevel.level}`,
                     detail: currentLevel.title,
                     age: 0,
-                    duration: 1.25,
+                    duration: 1.65,
+                    tone: "level",
+                    level: currentLevel.level,
                 });
                 sound?.play?.("select", { volume: 0.45 });
             }
@@ -313,10 +315,10 @@ export async function mountGame(session, options = {}) {
 
     function getColumnCount(width, height) {
         if (width < 520 || height > width * 1.35) {
-            return 20;
+            return 22;
         }
         if (width < 760) {
-            return 24;
+            return 26;
         }
         return desktopColumns;
     }
@@ -386,15 +388,14 @@ export async function mountGame(session, options = {}) {
         ctx.restore();
 
         ctx.save();
-        ctx.globalAlpha = 0.36;
+        ctx.globalAlpha = 0.12;
         ctx.strokeStyle = "#214574";
         ctx.lineWidth = 1;
         const spacing = Math.max(24, Math.min(bounds.width, bounds.height) * 0.075);
-        const drift = (pulseTime * 18) % spacing;
         for (let x = -spacing * 2; x < bounds.width + spacing * 2; x += spacing) {
             ctx.beginPath();
-            ctx.moveTo(x + drift, 0);
-            ctx.lineTo(x + drift + bounds.height * 0.18, bounds.height);
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x + bounds.height * 0.18, bounds.height);
             ctx.stroke();
         }
         ctx.restore();
@@ -402,7 +403,7 @@ export async function mountGame(session, options = {}) {
 
     function drawRouteGrid() {
         ctx.save();
-        ctx.globalAlpha = 0.3;
+        ctx.globalAlpha = 0.16;
         ctx.strokeStyle = "#1d3b65";
         ctx.lineWidth = 1;
         for (let column = 2; column < bounds.columns; column += 2) {
@@ -421,16 +422,16 @@ export async function mountGame(session, options = {}) {
         }
         ctx.restore();
 
-        const signalAlpha = 0.34 + Math.sin(pulseTime * 3.2) * 0.12;
+        const signalAlpha = 0.12 + Math.sin(pulseTime * 1.4) * 0.04;
         ctx.save();
         ctx.globalCompositeOperation = "lighter";
         ctx.globalAlpha = signalAlpha;
         ctx.fillStyle = "#54d3a5";
-        const signalCount = Math.max(8, Math.floor(bounds.columns / 3));
+        const signalCount = Math.max(4, Math.floor(bounds.columns / 6));
         for (let index = 0; index < signalCount; index += 1) {
-            const column = (index * 5 + Math.floor(pulseTime * 1.4)) % bounds.columns;
-            const row = (index * 7 + Math.floor(pulseTime * 0.9)) % bounds.rows;
-            const radius = Math.max(2.2, Math.min(bounds.cellWidth, bounds.cellHeight) * 0.105);
+            const column = (index * 7 + 3) % bounds.columns;
+            const row = (index * 11 + 5) % bounds.rows;
+            const radius = Math.max(1.4, Math.min(bounds.cellWidth, bounds.cellHeight) * 0.07);
             ctx.beginPath();
             ctx.arc((column + 0.5) * bounds.cellWidth, (row + 0.5) * bounds.cellHeight, radius, 0, Math.PI * 2);
             ctx.fill();
@@ -443,12 +444,12 @@ export async function mountGame(session, options = {}) {
         ctx.globalCompositeOperation = "lighter";
         snake.forEach((part, index) => {
             const progress = 1 - index / Math.max(1, snake.length);
-            const alpha = index === 0 ? 0.58 : Math.max(0.12, progress * 0.28);
-            const radius = Math.min(bounds.cellWidth, bounds.cellHeight) * (index === 0 ? 1.05 : 0.76);
+            const alpha = index === 0 ? 0.38 : Math.max(0.08, progress * 0.18);
+            const radius = Math.min(bounds.cellWidth, bounds.cellHeight) * (index === 0 ? 0.82 : 0.58);
             ctx.globalAlpha = alpha;
             ctx.fillStyle = index === 0 ? "#79d7ff" : "#54d3a5";
             ctx.shadowColor = ctx.fillStyle;
-            ctx.shadowBlur = Math.max(14, radius * 2.4);
+            ctx.shadowBlur = Math.max(8, radius * 1.9);
             ctx.beginPath();
             ctx.arc((part.x + 0.5) * bounds.cellWidth, (part.y + 0.5) * bounds.cellHeight, radius, 0, Math.PI * 2);
             ctx.fill();
@@ -458,21 +459,19 @@ export async function mountGame(session, options = {}) {
 
     function drawSnake() {
         snake.forEach((part, index) => {
-            const x = part.x * bounds.cellWidth + 1;
-            const y = part.y * bounds.cellHeight + 1;
-            const inset = index === 0 ? 0.35 : 0.65;
-            const width = bounds.cellWidth - 2 - inset * 2;
-            const height = bounds.cellHeight - 2 - inset * 2;
-            const pulse = index === 0 ? 1 + Math.sin(pulseTime * 9) * 0.055 : 1;
-            const cx = x + inset + width / 2;
-            const cy = y + inset + height / 2;
+            const inset = Math.min(bounds.cellWidth, bounds.cellHeight) * (index === 0 ? 0.16 : 0.2);
+            const width = Math.max(4, bounds.cellWidth - inset * 2);
+            const height = Math.max(4, bounds.cellHeight - inset * 2);
+            const pulse = index === 0 ? 1 + Math.sin(pulseTime * 7) * 0.035 : 1;
+            const cx = (part.x + 0.5) * bounds.cellWidth;
+            const cy = (part.y + 0.5) * bounds.cellHeight;
             ctx.save();
             ctx.translate(cx, cy);
             ctx.scale(pulse, pulse);
             ctx.fillStyle = index === 0 ? "#c6e3ff" : bodyColor(index);
             ctx.shadowColor = index === 0 ? "rgba(121, 215, 255, .72)" : "rgba(84, 211, 165, .34)";
-            ctx.shadowBlur = index === 0 ? Math.max(10, bounds.cellWidth * 0.66) : Math.max(4, bounds.cellWidth * 0.24);
-            roundRectPath(-width / 2, -height / 2, width, height, Math.max(4, Math.min(width, height) * 0.34));
+            ctx.shadowBlur = index === 0 ? Math.max(7, bounds.cellWidth * 0.45) : Math.max(3, bounds.cellWidth * 0.18);
+            roundRectPath(-width / 2, -height / 2, width, height, Math.max(3, Math.min(width, height) * 0.24));
             ctx.fill();
             ctx.shadowBlur = 0;
             ctx.globalAlpha = 0.26;
@@ -654,6 +653,10 @@ export async function mountGame(session, options = {}) {
 
     function drawBanners() {
         banners.forEach((banner) => {
+            if (banner.tone === "level") {
+                drawLevelUpBanner(banner);
+                return;
+            }
             const progress = Math.min(1, banner.age / banner.duration);
             const fade = progress > 0.72 ? 1 - (progress - 0.72) / 0.28 : 1;
             const scale = 0.92 + Math.sin(progress * Math.PI) * 0.12;
@@ -675,6 +678,64 @@ export async function mountGame(session, options = {}) {
             ctx.fillText(banner.detail, 0, Math.max(34, bounds.height * 0.07));
             ctx.restore();
         });
+    }
+
+    function drawLevelUpBanner(banner) {
+        const progress = Math.min(1, banner.age / banner.duration);
+        const intro = Math.min(1, progress / 0.18);
+        const fade = progress > 0.78 ? 1 - Math.min(1, (progress - 0.78) / 0.22) : 1;
+        const centerX = bounds.width / 2;
+        const centerY = bounds.height * 0.31;
+        const cellSize = Math.min(bounds.cellWidth, bounds.cellHeight);
+        const ringRadius = Math.min(bounds.width, bounds.height) * (0.1 + progress * 0.34);
+        const sparkProgress = Math.min(1, Math.max(0, (progress - 0.08) / 0.72));
+        const sparkCount = 22;
+
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = fade;
+        ctx.strokeStyle = "#ffd166";
+        ctx.lineWidth = Math.max(2, cellSize * 0.09);
+        ctx.shadowColor = "#ffd166";
+        ctx.shadowBlur = Math.max(18, cellSize * 1.1);
+
+        for (let index = 0; index < 3; index += 1) {
+            ctx.globalAlpha = fade * (0.46 - index * 0.11);
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, ringRadius + index * cellSize * 0.52, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        for (let index = 0; index < sparkCount; index += 1) {
+            const angle = (Math.PI * 2 * index) / sparkCount;
+            const distance = Math.min(bounds.width, bounds.height) * (0.06 + sparkProgress * 0.34);
+            const x = centerX + Math.cos(angle) * distance;
+            const y = centerY + Math.sin(angle) * distance * 0.68;
+            const radius = Math.max(2, cellSize * 0.1 * (1 - sparkProgress * 0.35));
+            ctx.globalAlpha = fade * (1 - sparkProgress * 0.7);
+            ctx.fillStyle = index % 3 === 0 ? "#54d3a5" : "#ffd166";
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        const scale = 0.82 + intro * 0.2 + Math.sin(progress * Math.PI) * 0.06;
+        ctx.globalAlpha = fade;
+        ctx.translate(centerX, centerY);
+        ctx.scale(scale, scale);
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.lineWidth = Math.max(5, cellSize * 0.18);
+        ctx.strokeStyle = "rgba(7, 16, 29, .88)";
+        ctx.fillStyle = "#f8fbff";
+        ctx.font = `900 ${Math.max(34, Math.floor(Math.min(bounds.width, bounds.height) * 0.105))}px Segoe UI, sans-serif`;
+        ctx.strokeText("LEVEL UP", 0, 0);
+        ctx.fillText("LEVEL UP", 0, 0);
+        ctx.fillStyle = "#ffd166";
+        ctx.font = `900 ${Math.max(19, Math.floor(Math.min(bounds.width, bounds.height) * 0.046))}px Segoe UI, sans-serif`;
+        ctx.strokeText(`LEVEL ${banner.level} - ${banner.detail}`, 0, Math.max(34, bounds.height * 0.07));
+        ctx.fillText(`LEVEL ${banner.level} - ${banner.detail}`, 0, Math.max(34, bounds.height * 0.07));
+        ctx.restore();
     }
 
     function drawDeathFlash() {
