@@ -7,7 +7,14 @@ export async function mountGame(session, options = {}) {
     const controlsHost = document.createElement("div");
     ui.movementControls.appendChild(controlsHost);
 
-    const columns = 32;
+    const desktopColumns = 32;
+    const levels = [
+        { id: "supply-start", level: 1, title: "Supply Start", targetSupplies: 5, tickSeconds: 0.138, foodValue: 1, bonusEvery: 5, bonusValue: 3, bonusTtl: 5.5 },
+        { id: "route-pace", level: 2, title: "Route Pace", targetSupplies: 10, tickSeconds: 0.124, foodValue: 1, bonusEvery: 5, bonusValue: 4, bonusTtl: 5.1 },
+        { id: "quick-hands", level: 3, title: "Quick Hands", targetSupplies: 16, tickSeconds: 0.112, foodValue: 1, bonusEvery: 4, bonusValue: 4, bonusTtl: 4.8 },
+        { id: "barangay-run", level: 4, title: "Barangay Run", targetSupplies: 24, tickSeconds: 0.102, foodValue: 1, bonusEvery: 4, bonusValue: 5, bonusTtl: 4.5 },
+        { id: "responder-flow", level: 5, title: "Responder Flow", targetSupplies: 34, tickSeconds: 0.094, foodValue: 1, bonusEvery: 3, bonusValue: 5, bonusTtl: 4.2 },
+    ];
     let bounds = getBounds();
     let snake = [centerCell(bounds)];
     let dir = { x: 1, y: 0 };
@@ -23,9 +30,16 @@ export async function mountGame(session, options = {}) {
     });
     let score = 0;
     let foodCollected = 0;
+    let combo = 0;
+    let comboTimer = 0;
+    let currentLevel = levels[0];
     let elapsed = 0;
     let pulseTime = 0;
     let eatEffects = [];
+    let floatingTexts = [];
+    let collectionBursts = [];
+    let banners = [];
+    let deathFlash = 0;
     let done = false;
     let paused = false;
 
@@ -40,14 +54,17 @@ export async function mountGame(session, options = {}) {
     const loop = createGameLoop({
         autoStart: false,
         update({ delta }) {
-            if (done || paused) {
+            if (paused) {
+                return;
+            }
+            pulseTime += delta;
+            updateEffects(delta);
+            if (done) {
                 return;
             }
             elapsed += delta;
-            pulseTime += delta;
-            updateEffects(delta);
             updateBonus(delta);
-            if (elapsed >= 0.135) {
+            if (elapsed >= currentLevel.tickSeconds) {
                 elapsed = 0;
                 tick();
             }
@@ -90,6 +107,16 @@ export async function mountGame(session, options = {}) {
         const head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
         if (head.x < 0 || head.y < 0 || head.x >= bounds.columns || head.y >= bounds.rows || snake.some((part) => part.x === head.x && part.y === head.y)) {
             done = true;
+            deathFlash = 0.72;
+            floatingTexts.push({
+                text: `Score ${score}`,
+                x: (snake[0].x + 0.5) * bounds.cellWidth,
+                y: (snake[0].y + 0.5) * bounds.cellHeight,
+                color: "#ff9faf",
+                age: 0,
+                duration: 1.2,
+            });
+            sound?.play?.("error", { volume: 0.54 });
             options.onStateChange?.("gameOver", { detail: `Score ${score}` });
             draw();
             return;
@@ -97,9 +124,24 @@ export async function mountGame(session, options = {}) {
         snake.unshift(head);
         const collected = supplies.collectAt(head.y, head.x);
         if (collected) {
+            const previousLevel = currentLevel.level;
             score += Number(collected.value) || 1;
             foodCollected += collected.type === "food" ? 1 : 0;
-            eatEffects.push({ x: head.x, y: head.y, age: 0, duration: collected.type === "bonus" ? 0.34 : 0.22, type: collected.type });
+            combo = Math.min(9, combo + 1);
+            comboTimer = collected.type === "bonus" ? 3.4 : 2.2;
+            spawnCollectionEffects(collected, head);
+            syncLevel();
+            if (currentLevel.level > previousLevel) {
+                banners.push({
+                    title: `Level ${currentLevel.level}`,
+                    detail: currentLevel.title,
+                    age: 0,
+                    duration: 1.65,
+                    tone: "level",
+                    level: currentLevel.level,
+                });
+                sound?.play?.("select", { volume: 0.45 });
+            }
             ensureFood();
             maybeSpawnBonus();
             sound?.play?.("score");
@@ -146,15 +188,22 @@ export async function mountGame(session, options = {}) {
         dir = { x: 1, y: 0 };
         next = { x: 1, y: 0 };
         supplies.reset();
+        score = 0;
+        foodCollected = 0;
+        combo = 0;
+        comboTimer = 0;
+        currentLevel = levels[0];
         ensureFood({
             column: Math.min(bounds.columns - 4, centerCell(bounds).x + 5),
             row: centerCell(bounds).y,
         });
-        score = 0;
-        foodCollected = 0;
         elapsed = 0;
         pulseTime = 0;
         eatEffects = [];
+        floatingTexts = [];
+        collectionBursts = [];
+        banners = [];
+        deathFlash = 0;
         done = false;
         paused = false;
         options.onStateChange?.("playing");
@@ -163,7 +212,27 @@ export async function mountGame(session, options = {}) {
     }
 
     function syncScore() {
-        ui.score.textContent = `Score ${score}`;
+        ui.score.textContent = `Score ${score}  Lv ${currentLevel.level}`;
+        options.onProgress?.({
+            type: "progress:update",
+            progress: {
+                gameId: "snake",
+                scheme: "endless",
+                level: currentLevel.level,
+                levelId: currentLevel.id,
+                levelName: currentLevel.title,
+                difficulty: currentLevel.level <= 2 ? "easy" : currentLevel.level <= 4 ? "normal" : "hard",
+                objective: "Collect supplies and keep the route clear",
+                score,
+                progressCurrent: foodCollected,
+                progressTarget: currentLevel.targetSupplies,
+                progressLabel: `Next level in ${Math.max(0, currentLevel.targetSupplies - foodCollected)} supplies`,
+            },
+        });
+    }
+
+    function syncLevel() {
+        currentLevel = getLevelForSupplies(foodCollected);
     }
 
     function ensureFood(preferred = null) {
@@ -173,20 +242,28 @@ export async function mountGame(session, options = {}) {
         supplies.spawn({
             id: "food",
             type: "food",
-            value: 1,
+            value: currentLevel.foodValue,
             column: preferred?.column,
             row: preferred?.row,
         });
     }
 
     function maybeSpawnBonus() {
-        if (foodCollected > 0 && foodCollected % 5 === 0 && !supplies.get("bonus")) {
+        if (foodCollected > 0 && foodCollected % currentLevel.bonusEvery === 0 && !supplies.get("bonus")) {
             supplies.spawn({
                 id: "bonus",
                 type: "bonus",
-                value: 3,
-                ttl: 5.5,
+                value: currentLevel.bonusValue,
+                ttl: currentLevel.bonusTtl,
             });
+            banners.push({
+                title: "Bonus Supply",
+                detail: "Grab it before it fades",
+                age: 0,
+                duration: 1.05,
+                tone: "bonus",
+            });
+            sound?.play?.("select", { volume: 0.36 });
         }
     }
 
@@ -203,14 +280,29 @@ export async function mountGame(session, options = {}) {
     }
 
     function updateEffects(delta) {
+        comboTimer = Math.max(0, comboTimer - delta);
+        if (comboTimer <= 0) {
+            combo = 0;
+        }
         eatEffects = eatEffects
             .map((effect) => ({ ...effect, age: effect.age + delta }))
             .filter((effect) => effect.age < effect.duration);
+        floatingTexts = floatingTexts
+            .map((effect) => ({ ...effect, age: effect.age + delta }))
+            .filter((effect) => effect.age < effect.duration);
+        collectionBursts = collectionBursts
+            .map((effect) => ({ ...effect, age: effect.age + delta }))
+            .filter((effect) => effect.age < effect.duration);
+        banners = banners
+            .map((effect) => ({ ...effect, age: effect.age + delta }))
+            .filter((effect) => effect.age < effect.duration);
+        deathFlash = Math.max(0, deathFlash - delta);
     }
 
     function getBounds() {
         const width = Math.max(1, layer.canvas.width);
         const height = Math.max(1, layer.canvas.height);
+        const columns = getColumnCount(width, height);
         const rows = Math.max(18, Math.round(columns * height / width));
         return {
             columns,
@@ -220,6 +312,16 @@ export async function mountGame(session, options = {}) {
             width,
             height,
         };
+    }
+
+    function getColumnCount(width, height) {
+        if (width < 520 || height > width * 1.35) {
+            return 22;
+        }
+        if (width < 760) {
+            return 26;
+        }
+        return desktopColumns;
     }
 
     function centerCell(currentBounds) {
@@ -243,37 +345,199 @@ export async function mountGame(session, options = {}) {
         ctx.clearRect(0, 0, bounds.width, bounds.height);
         ctx.fillStyle = "#07101d";
         ctx.fillRect(0, 0, bounds.width, bounds.height);
-        ctx.fillStyle = "#0b1220";
-        ctx.fillRect(0, 0, bounds.width, bounds.height);
+        drawBackdrop();
         ctx.strokeStyle = "#2b3750";
         ctx.strokeRect(0.5, 0.5, bounds.width - 1, bounds.height - 1);
+        drawRouteGrid();
+        drawSnakeGlow();
         drawSnake();
         drawSupplies();
         drawEatEffects();
+        drawCollectionBursts();
+        drawFloatingTexts();
+        drawBanners();
+        drawDeathFlash();
+    }
+
+    function drawBackdrop() {
+        const gradient = ctx.createRadialGradient(
+            bounds.width * 0.5,
+            bounds.height * 0.44,
+            Math.min(bounds.width, bounds.height) * 0.08,
+            bounds.width * 0.5,
+            bounds.height * 0.5,
+            Math.max(bounds.width, bounds.height) * 0.72,
+        );
+        gradient.addColorStop(0, "#0d1b30");
+        gradient.addColorStop(0.58, "#081525");
+        gradient.addColorStop(1, "#060d19");
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, bounds.width, bounds.height);
+
+        ctx.save();
+        ctx.globalAlpha = 0.52;
+        ctx.strokeStyle = "rgba(84, 211, 165, .22)";
+        ctx.lineWidth = Math.max(1, Math.min(bounds.cellWidth, bounds.cellHeight) * 0.08);
+        roundRectPath(
+            bounds.cellWidth * 0.8,
+            bounds.cellHeight * 0.8,
+            bounds.width - bounds.cellWidth * 1.6,
+            bounds.height - bounds.cellHeight * 1.6,
+            Math.max(10, Math.min(bounds.cellWidth, bounds.cellHeight) * 0.55),
+        );
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.save();
+        ctx.globalAlpha = 0.12;
+        ctx.strokeStyle = "#214574";
+        ctx.lineWidth = 1;
+        const spacing = Math.max(24, Math.min(bounds.width, bounds.height) * 0.075);
+        for (let x = -spacing * 2; x < bounds.width + spacing * 2; x += spacing) {
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x + bounds.height * 0.18, bounds.height);
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+
+    function drawRouteGrid() {
+        ctx.save();
+        ctx.globalAlpha = 0.16;
+        ctx.strokeStyle = "#1d3b65";
+        ctx.lineWidth = 1;
+        for (let column = 2; column < bounds.columns; column += 2) {
+            const x = column * bounds.cellWidth;
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, bounds.height);
+            ctx.stroke();
+        }
+        for (let row = 2; row < bounds.rows; row += 2) {
+            const y = row * bounds.cellHeight;
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(bounds.width, y);
+            ctx.stroke();
+        }
+        ctx.restore();
+
+        const signalAlpha = 0.12 + Math.sin(pulseTime * 1.4) * 0.04;
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = signalAlpha;
+        ctx.fillStyle = "#54d3a5";
+        const signalCount = Math.max(4, Math.floor(bounds.columns / 6));
+        for (let index = 0; index < signalCount; index += 1) {
+            const column = (index * 7 + 3) % bounds.columns;
+            const row = (index * 11 + 5) % bounds.rows;
+            const radius = Math.max(1.4, Math.min(bounds.cellWidth, bounds.cellHeight) * 0.07);
+            ctx.beginPath();
+            ctx.arc((column + 0.5) * bounds.cellWidth, (row + 0.5) * bounds.cellHeight, radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.restore();
+    }
+
+    function drawSnakeGlow() {
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        snake.forEach((part, index) => {
+            const progress = 1 - index / Math.max(1, snake.length);
+            const alpha = index === 0 ? 0.38 : Math.max(0.08, progress * 0.18);
+            const radius = Math.min(bounds.cellWidth, bounds.cellHeight) * (index === 0 ? 0.82 : 0.58);
+            ctx.globalAlpha = alpha;
+            ctx.fillStyle = index === 0 ? "#79d7ff" : "#54d3a5";
+            ctx.shadowColor = ctx.fillStyle;
+            ctx.shadowBlur = Math.max(8, radius * 1.9);
+            ctx.beginPath();
+            ctx.arc((part.x + 0.5) * bounds.cellWidth, (part.y + 0.5) * bounds.cellHeight, radius, 0, Math.PI * 2);
+            ctx.fill();
+        });
+        ctx.restore();
     }
 
     function drawSnake() {
         snake.forEach((part, index) => {
-            const x = part.x * bounds.cellWidth + 1;
-            const y = part.y * bounds.cellHeight + 1;
-            const inset = index === 0 ? 0.8 : 1.4;
-            ctx.fillStyle = index === 0 ? "#9ec5ff" : "#79a9ff";
-            ctx.fillRect(x + inset, y + inset, bounds.cellWidth - 2 - inset * 2, bounds.cellHeight - 2 - inset * 2);
+            const inset = Math.min(bounds.cellWidth, bounds.cellHeight) * (index === 0 ? 0.16 : 0.2);
+            const width = Math.max(4, bounds.cellWidth - inset * 2);
+            const height = Math.max(4, bounds.cellHeight - inset * 2);
+            const pulse = index === 0 ? 1 + Math.sin(pulseTime * 7) * 0.035 : 1;
+            const cx = (part.x + 0.5) * bounds.cellWidth;
+            const cy = (part.y + 0.5) * bounds.cellHeight;
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.scale(pulse, pulse);
+            ctx.fillStyle = index === 0 ? "#c6e3ff" : bodyColor(index);
+            ctx.shadowColor = index === 0 ? "rgba(121, 215, 255, .72)" : "rgba(84, 211, 165, .34)";
+            ctx.shadowBlur = index === 0 ? Math.max(7, bounds.cellWidth * 0.45) : Math.max(3, bounds.cellWidth * 0.18);
+            roundRectPath(-width / 2, -height / 2, width, height, Math.max(3, Math.min(width, height) * 0.24));
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.globalAlpha = 0.26;
+            ctx.fillStyle = "#ffffff";
+            roundRectPath(-width * 0.28, -height * 0.34, width * 0.56, height * 0.18, Math.max(2, height * 0.08));
+            ctx.fill();
+            ctx.globalAlpha = 1;
+            if (index === 0) {
+                drawHeadEyes(width, height);
+            } else if (index % 3 === 0) {
+                ctx.globalAlpha = 0.22;
+                ctx.fillStyle = "#e8f5ff";
+                ctx.beginPath();
+                ctx.arc(width * 0.16, -height * 0.12, Math.max(1.2, Math.min(width, height) * 0.08), 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.restore();
+        });
+    }
+
+    function bodyColor(index) {
+        const blend = Math.min(1, index / Math.max(1, snake.length));
+        return blend > 0.66 ? "#65ddb0" : blend > 0.33 ? "#77d2f2" : "#91b7ff";
+    }
+
+    function drawHeadEyes(width, height) {
+        const eyeRadius = Math.max(1.4, Math.min(width, height) * 0.1);
+        const forwardX = dir.x * width * 0.16;
+        const forwardY = dir.y * height * 0.16;
+        const sideX = dir.y === 0 ? 0 : width * 0.16;
+        const sideY = dir.x === 0 ? 0 : height * 0.16;
+        ctx.fillStyle = "#07101d";
+        [-1, 1].forEach((side) => {
+            ctx.beginPath();
+            ctx.arc(forwardX + sideX * side, forwardY + sideY * side, eyeRadius, 0, Math.PI * 2);
+            ctx.fill();
         });
     }
 
     function drawSupplies() {
         supplies.forEach((item) => {
-            const pulse = 1 + Math.sin(pulseTime * (item.type === "bonus" ? 9 : 6)) * (item.type === "bonus" ? 0.14 : 0.08);
+            const pulse = 1 + Math.sin(pulseTime * (item.type === "bonus" ? 9 : 6)) * (item.type === "bonus" ? 0.18 : 0.12);
             const centerX = (item.column + 0.5) * bounds.cellWidth;
             const centerY = (item.row + 0.5) * bounds.cellHeight;
-            const radius = Math.min(bounds.cellWidth, bounds.cellHeight) * (item.type === "bonus" ? 0.34 : 0.26) * pulse;
+            const radius = Math.min(bounds.cellWidth, bounds.cellHeight) * (item.type === "bonus" ? 0.46 : 0.34) * pulse;
             ctx.save();
+            const ttlAlpha = item.ttl == null ? 1 : Math.max(0.38, Math.min(1, item.ttl / currentLevel.bonusTtl));
             ctx.fillStyle = item.type === "bonus" ? "#ffd166" : "#4fd29b";
             ctx.globalAlpha = item.type === "bonus" ? 0.94 : 0.86;
+            ctx.shadowColor = item.type === "bonus" ? "#ffd166" : "#54d3a5";
+            ctx.shadowBlur = Math.max(12, radius * 1.8);
             ctx.beginPath();
             ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
             ctx.fill();
+            ctx.globalAlpha = item.type === "bonus" ? 0.22 : 0.16;
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius * 2.45, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.globalAlpha = ttlAlpha * 0.7;
+            ctx.strokeStyle = item.type === "bonus" ? "#fff1b8" : "#dfffea";
+            ctx.lineWidth = Math.max(1, radius * 0.16);
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius * 1.4, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * ttlAlpha);
+            ctx.stroke();
             ctx.restore();
         });
     }
@@ -293,6 +557,238 @@ export async function mountGame(session, options = {}) {
             ctx.stroke();
             ctx.restore();
         });
+    }
+
+    function spawnCollectionEffects(item, cell) {
+        const value = Number(item.value) || 1;
+        const bonus = item.type === "bonus";
+        const center = {
+            x: (cell.x + 0.5) * bounds.cellWidth,
+            y: (cell.y + 0.5) * bounds.cellHeight,
+        };
+        const color = bonus ? "#ffe071" : combo >= 4 ? "#9cf5ff" : "#75f0bd";
+        eatEffects.push({ x: cell.x, y: cell.y, age: 0, duration: bonus ? 0.42 : 0.28, type: item.type });
+        floatingTexts.push({
+            text: bonus ? `+${value} BONUS` : combo >= 3 ? `+${value}  x${combo}` : `+${value}`,
+            x: center.x,
+            y: center.y,
+            color,
+            age: 0,
+            duration: bonus ? 1.18 : 0.96,
+            bonus,
+            combo,
+        });
+        collectionBursts.push({
+            x: center.x,
+            y: center.y,
+            color,
+            bonus,
+            combo,
+            age: 0,
+            duration: bonus ? 0.62 : combo >= 3 ? 0.56 : 0.46,
+            particles: createCollectionParticles(bonus ? 18 : combo >= 3 ? 14 : 10),
+        });
+    }
+
+    function createCollectionParticles(count) {
+        return Array.from({ length: count }, (_, index) => {
+            const angle = (Math.PI * 2 * index) / count + Math.random() * 0.22;
+            return {
+                angle,
+                distance: 0.7 + Math.random() * 0.75,
+                size: 0.07 + Math.random() * 0.08,
+            };
+        });
+    }
+
+    function drawCollectionBursts() {
+        collectionBursts.forEach((effect) => {
+            const progress = Math.min(1, effect.age / effect.duration);
+            const cellSize = Math.min(bounds.cellWidth, bounds.cellHeight);
+            const alpha = 1 - progress;
+            ctx.save();
+            ctx.globalCompositeOperation = "lighter";
+            ctx.globalAlpha = alpha * (effect.combo >= 3 ? 0.78 : 0.62);
+            ctx.strokeStyle = effect.color;
+            ctx.lineWidth = Math.max(2, cellSize * 0.09);
+            ctx.shadowColor = effect.color;
+            ctx.shadowBlur = Math.max(10, cellSize * 0.8);
+            ctx.beginPath();
+            ctx.arc(effect.x, effect.y, cellSize * (0.42 + progress * (effect.bonus ? 1.4 : effect.combo >= 3 ? 1.24 : 1.05)), 0, Math.PI * 2);
+            ctx.stroke();
+
+            effect.particles.forEach((particle) => {
+                const distance = cellSize * particle.distance * progress;
+                const size = Math.max(2, cellSize * particle.size * (1 - progress * 0.25));
+                const x = effect.x + Math.cos(particle.angle) * distance;
+                const y = effect.y + Math.sin(particle.angle) * distance;
+                ctx.globalAlpha = alpha * (effect.bonus ? 0.92 : effect.combo >= 3 ? 0.84 : 0.72);
+                ctx.fillStyle = effect.color;
+                ctx.fillRect(x - size / 2, y - size / 2, size, size);
+            });
+            ctx.restore();
+        });
+    }
+
+    function drawFloatingTexts() {
+        floatingTexts.forEach((effect) => {
+            const progress = Math.min(1, effect.age / effect.duration);
+            const lift = effect.bonus ? 2.45 : 2.05;
+            const comboBoost = effect.combo >= 3 ? 1.12 : 1;
+            const fontSize = Math.max(effect.bonus ? 21 : 18, Math.floor(Math.min(bounds.cellWidth, bounds.cellHeight) * (effect.bonus ? 1.38 : 1.22) * comboBoost));
+            ctx.save();
+            ctx.globalAlpha = 1 - progress;
+            ctx.fillStyle = effect.color;
+            ctx.shadowColor = effect.color;
+            ctx.shadowBlur = 20;
+            ctx.font = `900 ${fontSize}px Segoe UI, sans-serif`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.lineWidth = Math.max(4, fontSize * 0.2);
+            ctx.strokeStyle = "rgba(7, 16, 29, .9)";
+            ctx.strokeText(effect.text, effect.x, effect.y - progress * bounds.cellHeight * lift);
+            ctx.fillText(effect.text, effect.x, effect.y - progress * bounds.cellHeight * lift);
+            ctx.restore();
+        });
+    }
+
+    function drawBanners() {
+        banners.forEach((banner) => {
+            if (banner.tone === "level") {
+                drawLevelUpBanner(banner);
+                return;
+            }
+            const progress = Math.min(1, banner.age / banner.duration);
+            const fade = progress > 0.72 ? 1 - (progress - 0.72) / 0.28 : 1;
+            const scale = 0.92 + Math.sin(progress * Math.PI) * 0.12;
+            const color = banner.tone === "bonus" ? "#ffe071" : "#79d7ff";
+            ctx.save();
+            ctx.globalAlpha = fade;
+            ctx.translate(bounds.width / 2, bounds.height * 0.28);
+            ctx.scale(scale, scale);
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 22;
+            ctx.fillStyle = "#f8fbff";
+            ctx.font = `900 ${Math.max(30, Math.floor(Math.min(bounds.width, bounds.height) * 0.1))}px Segoe UI, sans-serif`;
+            ctx.fillText(banner.title, 0, 0);
+            ctx.shadowBlur = 12;
+            ctx.fillStyle = banner.tone === "bonus" ? "#fff1b8" : "#9fc0ff";
+            ctx.font = `800 ${Math.max(14, Math.floor(Math.min(bounds.width, bounds.height) * 0.04))}px Segoe UI, sans-serif`;
+            ctx.fillText(banner.detail, 0, Math.max(34, bounds.height * 0.07));
+            ctx.restore();
+        });
+    }
+
+    function drawLevelUpBanner(banner) {
+        const progress = Math.min(1, banner.age / banner.duration);
+        const intro = Math.min(1, progress / 0.18);
+        const fade = progress > 0.78 ? 1 - Math.min(1, (progress - 0.78) / 0.22) : 1;
+        const centerX = bounds.width / 2;
+        const centerY = bounds.height * 0.31;
+        const cellSize = Math.min(bounds.cellWidth, bounds.cellHeight);
+        const ringRadius = Math.min(bounds.width, bounds.height) * (0.1 + progress * 0.34);
+        const sparkProgress = Math.min(1, Math.max(0, (progress - 0.08) / 0.72));
+        const sparkCount = 22;
+
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = fade;
+        ctx.strokeStyle = "#ffd166";
+        ctx.lineWidth = Math.max(2, cellSize * 0.09);
+        ctx.shadowColor = "#ffd166";
+        ctx.shadowBlur = Math.max(18, cellSize * 1.1);
+
+        for (let index = 0; index < 3; index += 1) {
+            ctx.globalAlpha = fade * (0.46 - index * 0.11);
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, ringRadius + index * cellSize * 0.52, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        for (let index = 0; index < sparkCount; index += 1) {
+            const angle = (Math.PI * 2 * index) / sparkCount;
+            const distance = Math.min(bounds.width, bounds.height) * (0.06 + sparkProgress * 0.34);
+            const x = centerX + Math.cos(angle) * distance;
+            const y = centerY + Math.sin(angle) * distance * 0.68;
+            const radius = Math.max(2, cellSize * 0.1 * (1 - sparkProgress * 0.35));
+            ctx.globalAlpha = fade * (1 - sparkProgress * 0.7);
+            ctx.fillStyle = index % 3 === 0 ? "#54d3a5" : "#ffd166";
+            ctx.beginPath();
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        const scale = 0.82 + intro * 0.2 + Math.sin(progress * Math.PI) * 0.06;
+        ctx.globalAlpha = fade;
+        ctx.translate(centerX, centerY);
+        ctx.scale(scale, scale);
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.lineWidth = Math.max(5, cellSize * 0.18);
+        ctx.strokeStyle = "rgba(7, 16, 29, .88)";
+        ctx.fillStyle = "#f8fbff";
+        ctx.font = `900 ${Math.max(34, Math.floor(Math.min(bounds.width, bounds.height) * 0.105))}px Segoe UI, sans-serif`;
+        ctx.strokeText("LEVEL UP", 0, 0);
+        ctx.fillText("LEVEL UP", 0, 0);
+        ctx.fillStyle = "#ffd166";
+        ctx.font = `900 ${Math.max(19, Math.floor(Math.min(bounds.width, bounds.height) * 0.046))}px Segoe UI, sans-serif`;
+        ctx.strokeText(`LEVEL ${banner.level} - ${banner.detail}`, 0, Math.max(34, bounds.height * 0.07));
+        ctx.fillText(`LEVEL ${banner.level} - ${banner.detail}`, 0, Math.max(34, bounds.height * 0.07));
+        ctx.restore();
+    }
+
+    function drawDeathFlash() {
+        if (deathFlash <= 0) {
+            return;
+        }
+        const progress = deathFlash / 0.72;
+        ctx.save();
+        ctx.globalAlpha = Math.min(0.42, progress * 0.42);
+        ctx.fillStyle = "#ff4d6d";
+        ctx.fillRect(0, 0, bounds.width, bounds.height);
+        ctx.restore();
+    }
+
+    function getLevelForSupplies(value) {
+        const authored = levels.find((level) => value < level.targetSupplies);
+        return authored || getLevelByNumber(levels[levels.length - 1].level + Math.floor((value - levels[levels.length - 1].targetSupplies) / 10) + 1);
+    }
+
+    function getLevelByNumber(levelNumber) {
+        const authored = levels.find((level) => level.level === levelNumber);
+        if (authored) {
+            return authored;
+        }
+        const last = levels[levels.length - 1];
+        const extraLevels = Math.max(1, levelNumber - last.level);
+        return {
+            ...last,
+            id: `extended-route-${levelNumber}`,
+            level: levelNumber,
+            title: "Extended Route",
+            targetSupplies: last.targetSupplies + extraLevels * 10,
+            tickSeconds: Math.max(0.082, last.tickSeconds - extraLevels * 0.004),
+            bonusEvery: Math.max(3, last.bonusEvery - Math.floor(extraLevels / 3)),
+            bonusValue: last.bonusValue + Math.floor(extraLevels / 2),
+            bonusTtl: Math.max(3.6, last.bonusTtl - extraLevels * 0.15),
+        };
+    }
+
+    function roundRectPath(x, y, width, height, radius) {
+        const r = Math.min(radius, width / 2, height / 2);
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + width - r, y);
+        ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+        ctx.lineTo(x + width, y + height - r);
+        ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+        ctx.lineTo(x + r, y + height);
+        ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
     }
 }
 
@@ -373,7 +869,7 @@ function createGridCollectibleLayer(options = {}) {
 
 function createShell(session, game) {
     const root = document.createElement("div");
-    root.className = "pbb-game-session-ui";
+    root.className = "pbb-game-session-ui pbb-snake-session-ui";
 
     const hud = document.createElement("div");
     hud.className = "pbb-game-session-hud";
