@@ -35,6 +35,7 @@ export async function mountGame(session, options = {}) {
     let pulseTime = 0;
     let eatEffects = [];
     let floatingTexts = [];
+    let collectionBursts = [];
     let banners = [];
     let deathFlash = 0;
     let done = false;
@@ -121,15 +122,7 @@ export async function mountGame(session, options = {}) {
             const previousLevel = currentLevel.level;
             score += Number(collected.value) || 1;
             foodCollected += collected.type === "food" ? 1 : 0;
-            eatEffects.push({ x: head.x, y: head.y, age: 0, duration: collected.type === "bonus" ? 0.34 : 0.22, type: collected.type });
-            floatingTexts.push({
-                text: collected.type === "bonus" ? "+3" : "+1",
-                x: (head.x + 0.5) * bounds.cellWidth,
-                y: (head.y + 0.5) * bounds.cellHeight,
-                color: collected.type === "bonus" ? "#ffe39a" : "#dfffea",
-                age: 0,
-                duration: 0.82,
-            });
+            spawnCollectionEffects(collected, head);
             syncLevel();
             if (currentLevel.level > previousLevel) {
                 banners.push({
@@ -197,6 +190,7 @@ export async function mountGame(session, options = {}) {
         pulseTime = 0;
         eatEffects = [];
         floatingTexts = [];
+        collectionBursts = [];
         banners = [];
         deathFlash = 0;
         done = false;
@@ -275,6 +269,9 @@ export async function mountGame(session, options = {}) {
         floatingTexts = floatingTexts
             .map((effect) => ({ ...effect, age: effect.age + delta }))
             .filter((effect) => effect.age < effect.duration);
+        collectionBursts = collectionBursts
+            .map((effect) => ({ ...effect, age: effect.age + delta }))
+            .filter((effect) => effect.age < effect.duration);
         banners = banners
             .map((effect) => ({ ...effect, age: effect.age + delta }))
             .filter((effect) => effect.age < effect.duration);
@@ -335,6 +332,7 @@ export async function mountGame(session, options = {}) {
         drawSnake();
         drawSupplies();
         drawEatEffects();
+        drawCollectionBursts();
         drawFloatingTexts();
         drawBanners();
         drawDeathFlash();
@@ -456,18 +454,92 @@ export async function mountGame(session, options = {}) {
         });
     }
 
+    function spawnCollectionEffects(item, cell) {
+        const value = Number(item.value) || 1;
+        const bonus = item.type === "bonus";
+        const center = {
+            x: (cell.x + 0.5) * bounds.cellWidth,
+            y: (cell.y + 0.5) * bounds.cellHeight,
+        };
+        const color = bonus ? "#ffe071" : "#75f0bd";
+        eatEffects.push({ x: cell.x, y: cell.y, age: 0, duration: bonus ? 0.42 : 0.28, type: item.type });
+        floatingTexts.push({
+            text: bonus ? `+${value} BONUS` : `+${value}`,
+            x: center.x,
+            y: center.y,
+            color,
+            age: 0,
+            duration: bonus ? 1.18 : 0.96,
+            bonus,
+        });
+        collectionBursts.push({
+            x: center.x,
+            y: center.y,
+            color,
+            bonus,
+            age: 0,
+            duration: bonus ? 0.62 : 0.46,
+            particles: createCollectionParticles(bonus ? 16 : 10),
+        });
+    }
+
+    function createCollectionParticles(count) {
+        return Array.from({ length: count }, (_, index) => {
+            const angle = (Math.PI * 2 * index) / count + Math.random() * 0.22;
+            return {
+                angle,
+                distance: 0.7 + Math.random() * 0.75,
+                size: 0.07 + Math.random() * 0.08,
+            };
+        });
+    }
+
+    function drawCollectionBursts() {
+        collectionBursts.forEach((effect) => {
+            const progress = Math.min(1, effect.age / effect.duration);
+            const cellSize = Math.min(bounds.cellWidth, bounds.cellHeight);
+            const alpha = 1 - progress;
+            ctx.save();
+            ctx.globalCompositeOperation = "lighter";
+            ctx.globalAlpha = alpha * 0.62;
+            ctx.strokeStyle = effect.color;
+            ctx.lineWidth = Math.max(2, cellSize * 0.09);
+            ctx.shadowColor = effect.color;
+            ctx.shadowBlur = Math.max(10, cellSize * 0.8);
+            ctx.beginPath();
+            ctx.arc(effect.x, effect.y, cellSize * (0.42 + progress * (effect.bonus ? 1.4 : 1.05)), 0, Math.PI * 2);
+            ctx.stroke();
+
+            effect.particles.forEach((particle) => {
+                const distance = cellSize * particle.distance * progress;
+                const size = Math.max(2, cellSize * particle.size * (1 - progress * 0.25));
+                const x = effect.x + Math.cos(particle.angle) * distance;
+                const y = effect.y + Math.sin(particle.angle) * distance;
+                ctx.globalAlpha = alpha * (effect.bonus ? 0.92 : 0.72);
+                ctx.fillStyle = effect.color;
+                ctx.fillRect(x - size / 2, y - size / 2, size, size);
+            });
+            ctx.restore();
+        });
+    }
+
     function drawFloatingTexts() {
         floatingTexts.forEach((effect) => {
             const progress = Math.min(1, effect.age / effect.duration);
+            const lift = effect.bonus ? 2.45 : 2.05;
+            const fontSize = Math.max(effect.bonus ? 21 : 18, Math.floor(Math.min(bounds.cellWidth, bounds.cellHeight) * (effect.bonus ? 1.38 : 1.22)));
             ctx.save();
             ctx.globalAlpha = 1 - progress;
             ctx.fillStyle = effect.color;
             ctx.shadowColor = effect.color;
-            ctx.shadowBlur = 16;
-            ctx.font = `900 ${Math.max(15, Math.floor(Math.min(bounds.cellWidth, bounds.cellHeight) * 1.05))}px Segoe UI, sans-serif`;
+            ctx.shadowBlur = 20;
+            ctx.font = `900 ${fontSize}px Segoe UI, sans-serif`;
             ctx.textAlign = "center";
             ctx.textBaseline = "middle";
-            ctx.fillText(effect.text, effect.x, effect.y - progress * bounds.cellHeight * 1.8);
+            ctx.lineWidth = Math.max(4, fontSize * 0.2);
+            ctx.strokeStyle = "rgba(7, 16, 29, .9)";
+            ctx.strokeText(effect.text, effect.x, effect.y - progress * bounds.cellHeight * lift);
+            ctx.fillText(effect.text, effect.x, effect.y - progress * bounds.cellHeight * lift);
             ctx.restore();
         });
     }
@@ -605,7 +677,7 @@ function createGridCollectibleLayer(options = {}) {
 
 function createShell(session, game) {
     const root = document.createElement("div");
-    root.className = "pbb-game-session-ui";
+    root.className = "pbb-game-session-ui pbb-snake-session-ui";
 
     const hud = document.createElement("div");
     hud.className = "pbb-game-session-hud";

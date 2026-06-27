@@ -272,6 +272,44 @@ a {
     justify-content: flex-end;
 }
 
+.pbb-snake-session-ui .pbb-game-session-title,
+.pbb-snake-session-ui .pbb-game-session-score {
+    background: rgba(7, 16, 29, .2);
+    border-color: rgba(126, 155, 205, .18);
+    color: rgba(232, 241, 255, .86);
+    box-shadow: none;
+    backdrop-filter: blur(3px);
+}
+
+.pbb-snake-session-ui .pbb-game-session-movement-controls {
+    opacity: .46;
+    transition: opacity .16s ease;
+}
+
+.pbb-snake-session-ui .pbb-game-session-movement-controls:hover,
+.pbb-snake-session-ui .pbb-game-session-movement-controls:focus-within {
+    opacity: .78;
+}
+
+.pbb-snake-session-ui .pbb-game-session-movement-controls .ui-game-joystick {
+    opacity: .62;
+}
+
+.pbb-active-game-session:has(.pbb-snake-session-ui) .ui-game-close,
+.pbb-direct-game-session:has(.pbb-snake-session-ui) .ui-game-close {
+    background: rgba(7, 16, 29, .18);
+    border-color: rgba(126, 155, 205, .18);
+    opacity: .62;
+    backdrop-filter: blur(3px);
+}
+
+.pbb-active-game-session:has(.pbb-snake-session-ui) .ui-game-close:hover,
+.pbb-active-game-session:has(.pbb-snake-session-ui) .ui-game-close:focus-visible,
+.pbb-direct-game-session:has(.pbb-snake-session-ui) .ui-game-close:hover,
+.pbb-direct-game-session:has(.pbb-snake-session-ui) .ui-game-close:focus-visible {
+    opacity: .9;
+}
+
 .pbb-tetris-session-actions {
     max-width: min(42vw, 220px);
 }
