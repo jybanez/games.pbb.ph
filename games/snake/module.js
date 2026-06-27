@@ -30,6 +30,8 @@ export async function mountGame(session, options = {}) {
     });
     let score = 0;
     let foodCollected = 0;
+    let combo = 0;
+    let comboTimer = 0;
     let currentLevel = levels[0];
     let elapsed = 0;
     let pulseTime = 0;
@@ -122,6 +124,8 @@ export async function mountGame(session, options = {}) {
             const previousLevel = currentLevel.level;
             score += Number(collected.value) || 1;
             foodCollected += collected.type === "food" ? 1 : 0;
+            combo = Math.min(9, combo + 1);
+            comboTimer = collected.type === "bonus" ? 3.4 : 2.2;
             spawnCollectionEffects(collected, head);
             syncLevel();
             if (currentLevel.level > previousLevel) {
@@ -185,6 +189,8 @@ export async function mountGame(session, options = {}) {
         });
         score = 0;
         foodCollected = 0;
+        combo = 0;
+        comboTimer = 0;
         currentLevel = levels[0];
         elapsed = 0;
         pulseTime = 0;
@@ -247,6 +253,14 @@ export async function mountGame(session, options = {}) {
                 value: 3,
                 ttl: currentLevel.bonusTtl,
             });
+            banners.push({
+                title: "Bonus Supply",
+                detail: "Grab it before it fades",
+                age: 0,
+                duration: 1.05,
+                tone: "bonus",
+            });
+            sound?.play?.("select", { volume: 0.36 });
         }
     }
 
@@ -263,6 +277,10 @@ export async function mountGame(session, options = {}) {
     }
 
     function updateEffects(delta) {
+        comboTimer = Math.max(0, comboTimer - delta);
+        if (comboTimer <= 0) {
+            combo = 0;
+        }
         eatEffects = eatEffects
             .map((effect) => ({ ...effect, age: effect.age + delta }))
             .filter((effect) => effect.age < effect.duration);
@@ -324,11 +342,11 @@ export async function mountGame(session, options = {}) {
         ctx.clearRect(0, 0, bounds.width, bounds.height);
         ctx.fillStyle = "#07101d";
         ctx.fillRect(0, 0, bounds.width, bounds.height);
-        ctx.fillStyle = "#0b1220";
-        ctx.fillRect(0, 0, bounds.width, bounds.height);
+        drawBackdrop();
         ctx.strokeStyle = "#2b3750";
         ctx.strokeRect(0.5, 0.5, bounds.width - 1, bounds.height - 1);
         drawRouteGrid();
+        drawSnakeGlow();
         drawSnake();
         drawSupplies();
         drawEatEffects();
@@ -338,9 +356,39 @@ export async function mountGame(session, options = {}) {
         drawDeathFlash();
     }
 
+    function drawBackdrop() {
+        const gradient = ctx.createRadialGradient(
+            bounds.width * 0.5,
+            bounds.height * 0.44,
+            Math.min(bounds.width, bounds.height) * 0.08,
+            bounds.width * 0.5,
+            bounds.height * 0.5,
+            Math.max(bounds.width, bounds.height) * 0.72,
+        );
+        gradient.addColorStop(0, "#0d1b30");
+        gradient.addColorStop(0.58, "#081525");
+        gradient.addColorStop(1, "#060d19");
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, bounds.width, bounds.height);
+
+        ctx.save();
+        ctx.globalAlpha = 0.22;
+        ctx.strokeStyle = "#173056";
+        ctx.lineWidth = 1;
+        const spacing = Math.max(24, Math.min(bounds.width, bounds.height) * 0.075);
+        const drift = (pulseTime * 18) % spacing;
+        for (let x = -spacing * 2; x < bounds.width + spacing * 2; x += spacing) {
+            ctx.beginPath();
+            ctx.moveTo(x + drift, 0);
+            ctx.lineTo(x + drift + bounds.height * 0.18, bounds.height);
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+
     function drawRouteGrid() {
         ctx.save();
-        ctx.globalAlpha = 0.24;
+        ctx.globalAlpha = 0.2;
         ctx.strokeStyle = "#14213a";
         ctx.lineWidth = 1;
         for (let column = 4; column < bounds.columns; column += 4) {
@@ -357,6 +405,40 @@ export async function mountGame(session, options = {}) {
             ctx.lineTo(bounds.width, y);
             ctx.stroke();
         }
+        ctx.restore();
+
+        const signalAlpha = 0.34 + Math.sin(pulseTime * 3.2) * 0.12;
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = signalAlpha;
+        ctx.fillStyle = "#54d3a5";
+        const signalCount = Math.max(4, Math.floor(bounds.columns / 5));
+        for (let index = 0; index < signalCount; index += 1) {
+            const column = (index * 5 + Math.floor(pulseTime * 1.4)) % bounds.columns;
+            const row = (index * 7 + Math.floor(pulseTime * 0.9)) % bounds.rows;
+            const radius = Math.max(1.5, Math.min(bounds.cellWidth, bounds.cellHeight) * 0.07);
+            ctx.beginPath();
+            ctx.arc((column + 0.5) * bounds.cellWidth, (row + 0.5) * bounds.cellHeight, radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        ctx.restore();
+    }
+
+    function drawSnakeGlow() {
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        snake.forEach((part, index) => {
+            const progress = 1 - index / Math.max(1, snake.length);
+            const alpha = index === 0 ? 0.34 : Math.max(0.04, progress * 0.16);
+            const radius = Math.min(bounds.cellWidth, bounds.cellHeight) * (index === 0 ? 0.72 : 0.54);
+            ctx.globalAlpha = alpha;
+            ctx.fillStyle = index === 0 ? "#79d7ff" : "#54d3a5";
+            ctx.shadowColor = ctx.fillStyle;
+            ctx.shadowBlur = Math.max(8, radius * 1.8);
+            ctx.beginPath();
+            ctx.arc((part.x + 0.5) * bounds.cellWidth, (part.y + 0.5) * bounds.cellHeight, radius, 0, Math.PI * 2);
+            ctx.fill();
+        });
         ctx.restore();
     }
 
@@ -461,25 +543,27 @@ export async function mountGame(session, options = {}) {
             x: (cell.x + 0.5) * bounds.cellWidth,
             y: (cell.y + 0.5) * bounds.cellHeight,
         };
-        const color = bonus ? "#ffe071" : "#75f0bd";
+        const color = bonus ? "#ffe071" : combo >= 4 ? "#9cf5ff" : "#75f0bd";
         eatEffects.push({ x: cell.x, y: cell.y, age: 0, duration: bonus ? 0.42 : 0.28, type: item.type });
         floatingTexts.push({
-            text: bonus ? `+${value} BONUS` : `+${value}`,
+            text: bonus ? `+${value} BONUS` : combo >= 3 ? `+${value}  x${combo}` : `+${value}`,
             x: center.x,
             y: center.y,
             color,
             age: 0,
             duration: bonus ? 1.18 : 0.96,
             bonus,
+            combo,
         });
         collectionBursts.push({
             x: center.x,
             y: center.y,
             color,
             bonus,
+            combo,
             age: 0,
-            duration: bonus ? 0.62 : 0.46,
-            particles: createCollectionParticles(bonus ? 16 : 10),
+            duration: bonus ? 0.62 : combo >= 3 ? 0.56 : 0.46,
+            particles: createCollectionParticles(bonus ? 18 : combo >= 3 ? 14 : 10),
         });
     }
 
@@ -501,13 +585,13 @@ export async function mountGame(session, options = {}) {
             const alpha = 1 - progress;
             ctx.save();
             ctx.globalCompositeOperation = "lighter";
-            ctx.globalAlpha = alpha * 0.62;
+            ctx.globalAlpha = alpha * (effect.combo >= 3 ? 0.78 : 0.62);
             ctx.strokeStyle = effect.color;
             ctx.lineWidth = Math.max(2, cellSize * 0.09);
             ctx.shadowColor = effect.color;
             ctx.shadowBlur = Math.max(10, cellSize * 0.8);
             ctx.beginPath();
-            ctx.arc(effect.x, effect.y, cellSize * (0.42 + progress * (effect.bonus ? 1.4 : 1.05)), 0, Math.PI * 2);
+            ctx.arc(effect.x, effect.y, cellSize * (0.42 + progress * (effect.bonus ? 1.4 : effect.combo >= 3 ? 1.24 : 1.05)), 0, Math.PI * 2);
             ctx.stroke();
 
             effect.particles.forEach((particle) => {
@@ -515,7 +599,7 @@ export async function mountGame(session, options = {}) {
                 const size = Math.max(2, cellSize * particle.size * (1 - progress * 0.25));
                 const x = effect.x + Math.cos(particle.angle) * distance;
                 const y = effect.y + Math.sin(particle.angle) * distance;
-                ctx.globalAlpha = alpha * (effect.bonus ? 0.92 : 0.72);
+                ctx.globalAlpha = alpha * (effect.bonus ? 0.92 : effect.combo >= 3 ? 0.84 : 0.72);
                 ctx.fillStyle = effect.color;
                 ctx.fillRect(x - size / 2, y - size / 2, size, size);
             });
@@ -527,7 +611,8 @@ export async function mountGame(session, options = {}) {
         floatingTexts.forEach((effect) => {
             const progress = Math.min(1, effect.age / effect.duration);
             const lift = effect.bonus ? 2.45 : 2.05;
-            const fontSize = Math.max(effect.bonus ? 21 : 18, Math.floor(Math.min(bounds.cellWidth, bounds.cellHeight) * (effect.bonus ? 1.38 : 1.22)));
+            const comboBoost = effect.combo >= 3 ? 1.12 : 1;
+            const fontSize = Math.max(effect.bonus ? 21 : 18, Math.floor(Math.min(bounds.cellWidth, bounds.cellHeight) * (effect.bonus ? 1.38 : 1.22) * comboBoost));
             ctx.save();
             ctx.globalAlpha = 1 - progress;
             ctx.fillStyle = effect.color;
@@ -549,19 +634,20 @@ export async function mountGame(session, options = {}) {
             const progress = Math.min(1, banner.age / banner.duration);
             const fade = progress > 0.72 ? 1 - (progress - 0.72) / 0.28 : 1;
             const scale = 0.92 + Math.sin(progress * Math.PI) * 0.12;
+            const color = banner.tone === "bonus" ? "#ffe071" : "#79d7ff";
             ctx.save();
             ctx.globalAlpha = fade;
             ctx.translate(bounds.width / 2, bounds.height * 0.28);
             ctx.scale(scale, scale);
             ctx.textAlign = "center";
             ctx.textBaseline = "middle";
-            ctx.shadowColor = "#79d7ff";
+            ctx.shadowColor = color;
             ctx.shadowBlur = 22;
             ctx.fillStyle = "#f8fbff";
             ctx.font = `900 ${Math.max(30, Math.floor(Math.min(bounds.width, bounds.height) * 0.1))}px Segoe UI, sans-serif`;
             ctx.fillText(banner.title, 0, 0);
             ctx.shadowBlur = 12;
-            ctx.fillStyle = "#9fc0ff";
+            ctx.fillStyle = banner.tone === "bonus" ? "#fff1b8" : "#9fc0ff";
             ctx.font = `800 ${Math.max(14, Math.floor(Math.min(bounds.width, bounds.height) * 0.04))}px Segoe UI, sans-serif`;
             ctx.fillText(banner.detail, 0, Math.max(34, bounds.height * 0.07));
             ctx.restore();
