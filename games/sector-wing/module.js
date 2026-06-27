@@ -58,7 +58,9 @@ const LEVEL_DEFINITIONS = [
 ];
 
 const PLAYER_RADIUS = 18;
+const PLAYER_MAX_ENERGY = 100;
 const PLAYER_MAX_SHIELD = 100;
+const PLAYER_START_ENERGY = 100;
 const PLAYER_START_SHIELD = 70;
 const PLAYER_START_LIVES = 3;
 
@@ -193,6 +195,7 @@ export function mountGame(session, options = {}) {
     function update(delta) {
         const level = getLevel();
         levelTime += delta;
+        player.energy = clamp(player.energy + 14 * delta, 0, PLAYER_MAX_ENERGY);
         fireCooldown = Math.max(0, fireCooldown - delta);
         spawnTimer -= delta;
         energyTimer -= delta;
@@ -406,6 +409,7 @@ export function mountGame(session, options = {}) {
                 pickup.collected = true;
                 if (pickup.type === "energy") {
                     score += 25;
+                    player.energy = clamp(player.energy + 22, 0, PLAYER_MAX_ENERGY);
                     player.shield = clamp(player.shield + 8, 0, PLAYER_MAX_SHIELD);
                     effects.push(createText("+25 ENERGY", pickup.x, pickup.y, "#7cf0c4"));
                 } else {
@@ -445,11 +449,12 @@ export function mountGame(session, options = {}) {
     }
 
     function fire() {
-        if (done || paused || routeClearTimer > 0 || fireCooldown > 0) {
+        if (done || paused || routeClearTimer > 0 || fireCooldown > 0 || player.energy < 8) {
             return;
         }
         const level = getLevel();
         fireCooldown = level.fireCooldown;
+        player.energy = clamp(player.energy - 8, 0, PLAYER_MAX_ENERGY);
         projectiles.push({
             x: player.x + player.radius * 0.85,
             y: player.y - player.radius * 0.18,
@@ -550,7 +555,8 @@ export function mountGame(session, options = {}) {
     function syncHud() {
         const level = getLevel();
         const progress = clamp(levelTime / level.durationSeconds, 0, 1);
-        ui.score.textContent = `Score ${score}  Lv ${level.level}  Lives ${player.lives}  Shield ${Math.max(0, Math.round(player.shield))}`;
+        ui.score.textContent = `Score ${score}  Lv ${level.level}`;
+        syncLifeIcons(ui.lives, player.lives);
         options.onProgress?.({
             type: "progress:update",
             progress: {
@@ -583,7 +589,7 @@ export function mountGame(session, options = {}) {
         drawPlayer();
         drawEffects();
         drawBanners();
-        drawRouteMeter();
+        drawStatusBars();
     }
 
     function drawBackdrop() {
@@ -594,19 +600,19 @@ export function mountGame(session, options = {}) {
         ctx.fillStyle = gradient;
         ctx.fillRect(0, 0, metrics.width, metrics.height);
 
-        ctx.save();
-        ctx.globalAlpha = 0.24;
-        ctx.strokeStyle = "#2a7fd4";
-        ctx.lineWidth = 1;
-        const spacing = clamp(metrics.width * 0.08, 42, 78);
-        const offset = -(levelTime * getLevel().scrollSpeed * 0.22) % spacing;
-        for (let x = offset - spacing; x < metrics.width + spacing; x += spacing) {
-            ctx.beginPath();
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x - metrics.height * 0.24, metrics.height);
-            ctx.stroke();
-        }
-        ctx.restore();
+        const glow = ctx.createRadialGradient(
+            metrics.width * 0.25,
+            metrics.height * 0.48,
+            Math.min(metrics.width, metrics.height) * 0.08,
+            metrics.width * 0.5,
+            metrics.height * 0.5,
+            Math.max(metrics.width, metrics.height) * 0.65,
+        );
+        glow.addColorStop(0, "rgba(86, 214, 255, .08)");
+        glow.addColorStop(0.55, "rgba(124, 240, 196, .025)");
+        glow.addColorStop(1, "rgba(86, 214, 255, 0)");
+        ctx.fillStyle = glow;
+        ctx.fillRect(0, 0, metrics.width, metrics.height);
     }
 
     function drawStars() {
@@ -867,20 +873,25 @@ export function mountGame(session, options = {}) {
         });
     }
 
-    function drawRouteMeter() {
-        const level = getLevel();
-        const progress = clamp(levelTime / level.durationSeconds, 0, 1);
-        const width = clamp(metrics.width * 0.24, 120, 240);
+    function drawStatusBars() {
+        const width = clamp(metrics.width * 0.22, 118, 210);
         const height = 5;
-        const x = metrics.width - width - clamp(metrics.width * 0.035, 14, 34);
-        const y = clamp(metrics.height * 0.055, 18, 36);
+        const rightInset = clamp(metrics.width * 0.12, 78, 126);
+        const x = metrics.width - width - rightInset;
+        const y = clamp(metrics.height * 0.05, 16, 30);
+        drawMeterBar(x, y, width, height, player.energy / PLAYER_MAX_ENERGY, "#56d6ff");
+        drawMeterBar(x, y + height + 6, width, height, player.shield / PLAYER_MAX_SHIELD, "#7cf0c4");
+    }
+
+    function drawMeterBar(x, y, width, height, progress, color) {
+        const value = clamp(progress, 0, 1);
         ctx.save();
-        ctx.globalAlpha = 0.9;
-        ctx.fillStyle = "rgba(248, 251, 255, .16)";
+        ctx.globalAlpha = 0.92;
+        ctx.fillStyle = "rgba(248, 251, 255, .14)";
         roundRectPath(x, y, width, height, height / 2);
         ctx.fill();
-        ctx.fillStyle = routeClearTimer > 0 ? "#ffd166" : "#56d6ff";
-        roundRectPath(x, y, width * progress, height, height / 2);
+        ctx.fillStyle = color;
+        roundRectPath(x, y, width * value, height, height / 2);
         ctx.fill();
         ctx.restore();
     }
@@ -1041,11 +1052,28 @@ function createShell(session, game) {
 
     const title = document.createElement("p");
     title.className = "pbb-game-session-title";
-    title.textContent = game.title;
+    title.style.display = "inline-flex";
+    title.style.alignItems = "center";
+    title.style.gap = "8px";
+
+    const titleText = document.createElement("span");
+    titleText.textContent = game.title;
+
+    const lives = document.createElement("span");
+    lives.className = "pbb-sector-wing-lives";
+    lives.setAttribute("aria-label", "Lives 3");
+    lives.style.display = "inline-flex";
+    lives.style.alignItems = "center";
+    lives.style.gap = "4px";
+    lives.style.marginLeft = "2px";
+    lives.style.pointerEvents = "none";
+
+    title.append(titleText, lives);
+    syncLifeIcons(lives, PLAYER_START_LIVES);
 
     const score = document.createElement("p");
     score.className = "ui-badge pbb-game-session-score";
-    score.textContent = "Score 0  Lv 1  Lives 3  Shield 70";
+    score.textContent = "Score 0  Lv 1";
 
     const movementControls = document.createElement("div");
     movementControls.className = "pbb-game-session-movement-controls";
@@ -1057,7 +1085,32 @@ function createShell(session, game) {
     root.append(hud, score, movementControls, actions);
     session.overlay.appendChild(root);
 
-    return { root, score, movementControls, actions };
+    return { root, score, lives, movementControls, actions };
+}
+
+function syncLifeIcons(container, lives) {
+    if (!container) {
+        return;
+    }
+    const count = Math.max(0, Math.min(PLAYER_START_LIVES, Math.round(lives)));
+    container.replaceChildren();
+    container.setAttribute("aria-label", `Lives ${count}`);
+    for (let index = 0; index < count; index += 1) {
+        container.appendChild(createLifeShipIcon());
+    }
+}
+
+function createLifeShipIcon() {
+    const icon = document.createElement("span");
+    icon.className = "pbb-sector-wing-life-ship";
+    icon.setAttribute("aria-hidden", "true");
+    icon.style.display = "inline-block";
+    icon.style.width = "14px";
+    icon.style.height = "10px";
+    icon.style.background = "linear-gradient(90deg, #f8fbff 0%, #8ee7ff 78%)";
+    icon.style.clipPath = "polygon(100% 50%, 0 0, 24% 50%, 0 100%)";
+    icon.style.filter = "drop-shadow(0 0 5px rgba(86, 214, 255, .82))";
+    return icon;
 }
 
 function createPlayer(metrics) {
@@ -1066,6 +1119,7 @@ function createPlayer(metrics) {
         y: metrics.height * 0.5,
         radius: PLAYER_RADIUS,
         lives: PLAYER_START_LIVES,
+        energy: PLAYER_START_ENERGY,
         shield: PLAYER_START_SHIELD,
         invulnerable: 1.2,
         hitFlash: 0,
