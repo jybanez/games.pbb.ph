@@ -19,13 +19,18 @@ const PATROL_PHASES = [
     { mode: "chase", duration: 18 },
 ];
 
-const PATROL_LIMIT = 4;
 const PATROL_COLORS = ["#ff7a90", "#ffb15f", "#7dd7ff", "#c18cff"];
 const PATROL_SCATTER_TARGETS = [
     { row: 1, column: 17 },
     { row: 13, column: 1 },
     { row: 13, column: 17 },
     { row: 1, column: 1 },
+];
+
+const ROUTE_MILESTONES = [
+    { progress: 0.25, title: "Route 25%", detail: "Keep supplies moving" },
+    { progress: 0.5, title: "Route 50%", detail: "Half the route is clear" },
+    { progress: 0.75, title: "Route 75%", detail: "Final supply lanes" },
 ];
 
 const MAZE_MAP = [
@@ -46,10 +51,46 @@ const MAZE_MAP = [
     "###################",
 ];
 
+const LEVEL_DEFINITIONS = [
+    {
+        id: "route-alpha",
+        level: 1,
+        title: "Route Alpha",
+        objective: "Collect every supply marker and keep the route open.",
+        map: MAZE_MAP,
+        lives: 3,
+        playerSpeed: 4.4,
+        patrolLimit: 4,
+        patrolSpeedBase: 3.25,
+        patrolSpeedStep: 0.16,
+        powerDuration: 7,
+        supplyValue: 10,
+        powerValue: 50,
+        clearBonus: 500,
+        safetyDuration: 2.4,
+        respawnSafetyDuration: 1.8,
+    },
+    {
+        id: "route-bravo",
+        level: 2,
+        title: "Route Bravo",
+        objective: "Clear the same route with tighter patrol timing.",
+        map: MAZE_MAP,
+        lives: 3,
+        playerSpeed: 4.55,
+        patrolLimit: 4,
+        patrolSpeedBase: 3.42,
+        patrolSpeedStep: 0.18,
+        powerDuration: 6.2,
+        supplyValue: 12,
+        powerValue: 60,
+        clearBonus: 800,
+        safetyDuration: 2.1,
+        respawnSafetyDuration: 1.55,
+    },
+];
+
 const PATROL_BASE_TILES = new Set(["B", "D", "G"]);
-const PATROL_BASE_CELLS = MAZE_MAP.flatMap((rowText, row) => [...rowText]
-    .map((tile, column) => ({ row, column, tile }))
-    .filter((cell) => PATROL_BASE_TILES.has(cell.tile)));
 
 const TILE_DEFINITIONS = {
     "#": { type: "wall", enterable: false },
@@ -62,6 +103,20 @@ const TILE_DEFINITIONS = {
     " ": { type: "path" },
 };
 
+function getLevelTileDefinitions(level) {
+    return {
+        ...TILE_DEFINITIONS,
+        ".": { ...TILE_DEFINITIONS["."], collectible: { type: "supply", value: level.supplyValue } },
+        "o": { ...TILE_DEFINITIONS.o, collectible: { type: "power", value: level.powerValue } },
+    };
+}
+
+function getPatrolBaseCells(map) {
+    return map.flatMap((rowText, row) => [...rowText]
+        .map((tile, column) => ({ row, column, tile }))
+        .filter((cell) => PATROL_BASE_TILES.has(cell.tile)));
+}
+
 export async function mountGame(session, options = {}) {
     const { createGameLoop, createTouchControlPad } = options.helper["./ui.game.core.js"];
     const { createGridMaze, createGridMover, createGridPathfinder } = options.helper["./ui.game.grid.js"];
@@ -70,29 +125,34 @@ export async function mountGame(session, options = {}) {
     const ui = createShell(session, options.game || { title: "Supply Run" });
     const sound = options.sound;
 
-    const maze = createGridMaze({
-        map: MAZE_MAP,
-        tiles: TILE_DEFINITIONS,
-        cellSize: 1,
-    });
-    const pathfinder = createGridPathfinder({
-        rows: maze.rows,
-        columns: maze.columns,
-        canEnter: (row, column) => maze.canEnter(row, column),
-    });
-    const playerSpawn = maze.points.playerSpawn || { row: 1, column: 1 };
-    const patrolSpawns = maze.getPoints("patrolSpawn");
-
+    let levelIndex = 0;
+    let currentLevel = LEVEL_DEFINITIONS[levelIndex];
+    let maze = null;
+    let pathfinder = null;
+    let playerSpawn = null;
+    let patrolSpawns = [];
+    let patrolBaseCells = [];
     let player = null;
     let patrols = [];
     let supplies = new Map();
     let score = 0;
     let lives = 3;
+    let totalSupplies = 0;
     let powerTimer = 0;
+    let powerCatchStreak = 0;
+    let powerWarningShown = false;
+    let safetyTimer = 0;
     let patrolPhaseIndex = 0;
     let patrolPhaseTimer = PATROL_PHASES[0].duration;
     let respawnTimer = 0;
     let pulseTime = 0;
+    let feedbacks = [];
+    let banners = [];
+    let bursts = [];
+    let routeTraces = [];
+    let routeMilestoneIndex = -1;
+    let levelClearTimer = 0;
+    let lifeFlash = 0;
     let running = true;
     let paused = false;
     let done = false;
@@ -122,7 +182,19 @@ export async function mountGame(session, options = {}) {
     const loop = createGameLoop({
         autoStart: false,
         update({ delta }) {
-            if (!running || paused || done) {
+            if (paused) {
+                return;
+            }
+            pulseTime += delta;
+            updateFeedback(delta);
+            if (done) {
+                return;
+            }
+            if (levelClearTimer > 0) {
+                update(delta);
+                return;
+            }
+            if (!running) {
                 return;
             }
             update(delta);
@@ -164,31 +236,69 @@ export async function mountGame(session, options = {}) {
     };
 
     function reset() {
+        levelIndex = 0;
         score = 0;
-        lives = 3;
+        startLevel(levelIndex, { resetScore: false, announce: false });
+    }
+
+    function startLevel(nextLevelIndex, { resetScore = false, announce = true } = {}) {
+        currentLevel = LEVEL_DEFINITIONS[nextLevelIndex] || LEVEL_DEFINITIONS[LEVEL_DEFINITIONS.length - 1];
+        levelIndex = Math.min(nextLevelIndex, LEVEL_DEFINITIONS.length - 1);
+        maze = createGridMaze({
+            map: currentLevel.map,
+            tiles: getLevelTileDefinitions(currentLevel),
+            cellSize: 1,
+        });
+        pathfinder = createGridPathfinder({
+            rows: maze.rows,
+            columns: maze.columns,
+            canEnter: (row, column) => maze.canEnter(row, column),
+        });
+        playerSpawn = maze.points.playerSpawn || { row: 1, column: 1 };
+        patrolSpawns = maze.getPoints("patrolSpawn");
+        patrolBaseCells = getPatrolBaseCells(currentLevel.map);
+        if (resetScore) {
+            score = 0;
+        }
+        lives = currentLevel.lives;
         powerTimer = 0;
+        powerCatchStreak = 0;
+        powerWarningShown = false;
+        safetyTimer = currentLevel.safetyDuration;
         patrolPhaseIndex = 0;
         patrolPhaseTimer = PATROL_PHASES[0].duration;
         respawnTimer = 0;
         pulseTime = 0;
+        feedbacks = [];
+        banners = [];
+        bursts = [];
+        routeTraces = [];
+        routeMilestoneIndex = -1;
+        levelClearTimer = 0;
+        lifeFlash = 0;
         running = true;
         paused = false;
         done = false;
         supplies = createSupplyState();
+        totalSupplies = countSupplyMarkers();
         resetActors();
         options.onStateChange?.("playing");
         syncScore();
+        if (announce) {
+            showBanner(`Level ${currentLevel.level}`, currentLevel.title, "#79d7ff", 1.05);
+            sound?.play?.("select", { volume: 0.42 });
+        }
         draw();
     }
 
     function resetActors() {
         resetPlayer();
-        patrols = (patrolSpawns.length ? patrolSpawns : [{ row: 1, column: maze.columns - 2 }]).slice(0, PATROL_LIMIT).map((spawn, index) => {
+        patrols = (patrolSpawns.length ? patrolSpawns : [{ row: 1, column: maze.columns - 2 }]).slice(0, currentLevel.patrolLimit).map((spawn, index) => {
             const mover = createGridMover({
                 row: spawn.row,
                 column: spawn.column,
                 direction: index % 2 === 0 ? "left" : "right",
-                speed: 3.25 + index * 0.16,
+                speed: currentLevel.patrolSpeedBase + index * currentLevel.patrolSpeedStep,
                 cellSize: 1,
                 canEnter: (row, column) => maze.canEnter(row, column),
             });
@@ -211,7 +321,7 @@ export async function mountGame(session, options = {}) {
             row: playerSpawn.row,
             column: playerSpawn.column,
             direction: "right",
-            speed: 4.4,
+            speed: currentLevel.playerSpeed,
             cellSize: 1,
             preTurnTolerance: 0.18,
             canEnter: (row, column) => maze.canEnter(row, column),
@@ -221,14 +331,33 @@ export async function mountGame(session, options = {}) {
     }
 
     function update(delta) {
-        pulseTime += delta;
         if (respawnTimer > 0) {
             respawnTimer = Math.max(0, respawnTimer - delta);
             return;
         }
-        if (powerTimer > 0) {
-            powerTimer = Math.max(0, powerTimer - delta);
+        if (levelClearTimer > 0) {
+            levelClearTimer = Math.max(0, levelClearTimer - delta);
+            if (levelClearTimer <= 0) {
+                completeRouteClear();
+            }
+            return;
         }
+        if (powerTimer > 0) {
+            const previousPowerTimer = powerTimer;
+            powerTimer = Math.max(0, powerTimer - delta);
+            if (powerTimer <= 0) {
+                powerCatchStreak = 0;
+                powerWarningShown = false;
+                syncScore();
+            } else if (!powerWarningShown && previousPowerTimer > 2 && powerTimer <= 2) {
+                powerWarningShown = true;
+                showBanner("Power Fading", "Avoid patrol contact", "#ffd166", 0.9);
+                syncScore();
+            } else if (Math.ceil(previousPowerTimer) !== Math.ceil(powerTimer)) {
+                syncScore();
+            }
+        }
+        safetyTimer = Math.max(0, safetyTimer - delta);
         updatePatrolMode(delta);
 
         const playerState = player.update(delta);
@@ -261,13 +390,19 @@ export async function mountGame(session, options = {}) {
         }
         supplies.delete(key);
         score += item.value;
+        addFeedback(`+${item.value}`, item, item.type === "power" ? "#fff1a8" : "#dfffea");
+        addBurst(item, item.type === "power" ? "#ffd166" : "#54d3a5", item.type === "power" ? 18 : 10);
         if (item.type === "power") {
-            powerTimer = 7;
+            powerTimer = currentLevel.powerDuration;
+            powerCatchStreak = 0;
+            powerWarningShown = false;
+            showBanner("Power Kit", "Patrols are vulnerable", "#ffd166", 1.05);
         }
         sound?.play?.("score", { volume: item.type === "power" ? 0.72 : 0.45 });
         syncScore();
+        checkRouteMilestone();
         if (![...supplies.values()].some((supply) => supply.type === "supply")) {
-            winGame();
+            beginRouteClear();
         }
     }
 
@@ -409,11 +544,19 @@ export async function mountGame(session, options = {}) {
         if (!hit) {
             return;
         }
+        if (safetyTimer > 0) {
+            return;
+        }
         if (powerTimer > 0) {
-            score += 100;
+            powerCatchStreak += 1;
+            const award = 100 * Math.min(powerCatchStreak, 4);
+            score += award;
             hit.mode = "returning";
             hit.returnPath = buildReturnPath(hit.mover.getState(), hit.spawn);
             hit.reviveTimer = 0;
+            addFeedback(`+${award}`, hit.mover.getState(), "#fff1a8");
+            addBurst(hit.mover.getState(), "#ffd166", 18);
+            showBanner("Patrol Rerouted", `+${award}`, "#ffd166", 0.74);
             sound?.play?.("score", { volume: 0.78 });
             syncScore();
             return;
@@ -428,24 +571,52 @@ export async function mountGame(session, options = {}) {
     function loseLife() {
         lives -= 1;
         powerTimer = 0;
+        powerCatchStreak = 0;
+        powerWarningShown = false;
+        lifeFlash = 0.68;
+        addBurst(player.getState(), "#ff7a90", 24);
         sound?.play?.("error", { volume: 0.54 });
         if (lives <= 0) {
             done = true;
             running = false;
             syncScore();
+            showBanner("Run Stopped", `Score ${score}`, "#ff9faf", 1.4);
             options.onStateChange?.("gameOver", { detail: `Score ${score}` });
             return;
         }
         respawnTimer = 1.2;
+        safetyTimer = currentLevel.respawnSafetyDuration;
         resetPlayer();
+        showBanner("Runner Reset", `${lives} lives left`, "#ffb15f", 0.95);
         syncScore();
     }
 
-    function winGame() {
+    function beginRouteClear() {
+        if (levelClearTimer > 0 || done) {
+            return;
+        }
+        levelClearTimer = 1.35;
+        running = false;
+        powerTimer = 0;
+        const award = currentLevel.clearBonus;
+        score += award;
+        routeTraces = createRouteTraces();
+        syncScore();
+        showBanner("Route Clear", `+${award} | ${currentLevel.title}`, "#54d3a5", 1.35);
+        sound?.play?.("win", { volume: 0.58 });
+    }
+
+    function completeRouteClear() {
+        const hasNextLevel = levelIndex + 1 < LEVEL_DEFINITIONS.length;
+        if (hasNextLevel) {
+            startLevel(levelIndex + 1, { resetScore: false, announce: true });
+            return;
+        }
         done = true;
         running = false;
         syncScore();
-        options.onStateChange?.("won", { title: "Route Cleared", detail: `Score ${score}` });
+        showBanner("Mission Complete", `Score ${score}`, "#54d3a5", 1.45);
+        options.onStateChange?.("won", { title: "Mission Complete", detail: `Score ${score}` });
     }
 
     function handleKeydown(event) {
@@ -467,12 +638,33 @@ export async function mountGame(session, options = {}) {
             row: item.row,
             column: item.column,
             type: item.type,
-            value: Number(item.value) || (item.type === "power" ? 50 : 10),
+            value: Number(item.value) || (item.type === "power" ? currentLevel.powerValue : currentLevel.supplyValue),
         }]));
     }
 
     function syncScore() {
-        ui.score.textContent = `Score ${score}  Lives ${lives}`;
+        const progress = getRouteProgress();
+        const suppliesRemaining = countSupplyMarkers();
+        const powerLabel = powerTimer > 0 ? `  Power ${Math.ceil(powerTimer)}s` : "";
+        ui.score.textContent = `Score ${score}  Lv ${currentLevel.level}  Lives ${lives}  Supplies ${suppliesRemaining}${powerLabel}`;
+        options.onProgress?.({
+            type: "progress:update",
+            progress: {
+                gameId: "pacman",
+                mode: "supply-run",
+                scheme: "challenge",
+                level: currentLevel.level,
+                levelId: currentLevel.id,
+                levelName: currentLevel.title,
+                difficulty: lives >= 3 ? "easy" : lives === 2 ? "normal" : "hard",
+                objective: currentLevel.objective,
+                score,
+                lives,
+                progressCurrent: totalSupplies - suppliesRemaining,
+                progressTarget: totalSupplies,
+                progressLabel: `Supplies ${suppliesRemaining} remaining`,
+            },
+        });
     }
 
     function draw() {
@@ -484,8 +676,15 @@ export async function mountGame(session, options = {}) {
         drawMaze(layout);
         drawPatrolBase(layout);
         drawSupplies(layout);
+        drawRouteProgress(layout);
+        drawRouteTraces(layout);
+        drawBursts(layout);
         patrols.forEach((patrol) => drawPatrol(layout, patrol));
+        drawDangerLinks(layout);
         drawPlayer(layout);
+        drawFeedbacks(layout);
+        drawBanners(layout);
+        drawPowerAndLifeFlash(layout);
         if (respawnTimer > 0) {
             drawReadyPulse(layout);
         }
@@ -564,14 +763,35 @@ export async function mountGame(session, options = {}) {
         });
     }
 
+    function drawRouteProgress(layout) {
+        const progress = getRouteProgress();
+        const width = Math.min(layout.boardWidth * 0.72, layout.width * 0.54);
+        const height = Math.max(5, Math.min(8, layout.cellSize * 0.24));
+        const x = layout.boardX + (layout.boardWidth - width) / 2;
+        const y = Math.max(42, layout.boardY - layout.cellSize * 0.7);
+
+        ctx.save();
+        ctx.fillStyle = "rgba(7, 16, 29, .72)";
+        ctx.strokeStyle = "rgba(126, 155, 205, .28)";
+        roundRect(x, y, width, height, height / 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = powerTimer > 0 ? "#ffd166" : "#54d3a5";
+        ctx.shadowColor = powerTimer > 0 ? "#ffd166" : "#54d3a5";
+        ctx.shadowBlur = 10;
+        roundRect(x, y, Math.max(height, width * progress), height, height / 2);
+        ctx.fill();
+        ctx.restore();
+    }
+
     function drawPatrolBase(layout) {
-        if (!PATROL_BASE_CELLS.length) {
+        if (!patrolBaseCells.length) {
             return;
         }
-        const minRow = Math.min(...PATROL_BASE_CELLS.map((cell) => cell.row));
-        const maxRow = Math.max(...PATROL_BASE_CELLS.map((cell) => cell.row));
-        const minColumn = Math.min(...PATROL_BASE_CELLS.map((cell) => cell.column));
-        const maxColumn = Math.max(...PATROL_BASE_CELLS.map((cell) => cell.column));
+        const minRow = Math.min(...patrolBaseCells.map((cell) => cell.row));
+        const maxRow = Math.max(...patrolBaseCells.map((cell) => cell.row));
+        const minColumn = Math.min(...patrolBaseCells.map((cell) => cell.column));
+        const maxColumn = Math.max(...patrolBaseCells.map((cell) => cell.column));
         const inset = Math.max(2, layout.cellSize * 0.1);
         const x = layout.boardX + minColumn * layout.cellSize + inset;
         const y = layout.boardY + minRow * layout.cellSize + inset;
@@ -587,7 +807,7 @@ export async function mountGame(session, options = {}) {
         roundRect(x, y, width, height, Math.max(3, layout.cellSize * 0.16));
         ctx.stroke();
 
-        PATROL_BASE_CELLS.forEach((cell) => {
+        patrolBaseCells.forEach((cell) => {
             const cellX = layout.boardX + cell.column * layout.cellSize;
             const cellY = layout.boardY + cell.row * layout.cellSize;
             if (cell.tile === "D") {
@@ -613,12 +833,16 @@ export async function mountGame(session, options = {}) {
         const bodyHeight = radius * 1.42;
         const bodyX = center.x - bodyWidth / 2;
         const bodyY = center.y - bodyHeight * 0.48 + bob;
-        const glowColor = powerTimer > 0 ? "#ffd166" : "#79d7ff";
+        const glowColor = powerTimer > 0 ? "#ffd166" : safetyTimer > 0 ? "#54d3a5" : "#79d7ff";
 
         ctx.save();
         ctx.shadowColor = glowColor;
-        ctx.shadowBlur = powerTimer > 0 ? radius * 0.7 : radius * 0.35;
-        ctx.fillStyle = powerTimer > 0 ? "rgba(255, 209, 102, .18)" : "rgba(121, 215, 255, .14)";
+        ctx.shadowBlur = powerTimer > 0 ? radius * 0.7 : safetyTimer > 0 ? radius * 0.56 : radius * 0.35;
+        ctx.fillStyle = powerTimer > 0
+            ? "rgba(255, 209, 102, .18)"
+            : safetyTimer > 0
+                ? "rgba(84, 211, 165, .16)"
+                : "rgba(121, 215, 255, .14)";
         ctx.beginPath();
         ctx.arc(center.x, center.y + bob, radius * 1.18, 0, Math.PI * 2);
         ctx.fill();
@@ -647,7 +871,7 @@ export async function mountGame(session, options = {}) {
         ctx.fill();
 
         const eyeOffset = vector.column * radius * 0.07;
-        ctx.fillStyle = powerTimer > 0 ? "#fff1a8" : "#8cf2ff";
+        ctx.fillStyle = powerTimer > 0 ? "#fff1a8" : safetyTimer > 0 ? "#dfffea" : "#8cf2ff";
         [-0.18, 0.18].forEach((offset) => {
             ctx.beginPath();
             ctx.ellipse(
@@ -783,6 +1007,36 @@ export async function mountGame(session, options = {}) {
         ctx.restore();
     }
 
+    function drawDangerLinks(layout) {
+        if (!player || respawnTimer > 0 || levelClearTimer > 0) {
+            return;
+        }
+        const playerState = player.getState();
+        const playerCenter = worldToScreen(layout, playerState.x, playerState.y);
+        patrols.forEach((patrol) => {
+            if (!isPatrolActiveForCollision(patrol) || patrol.mode === "frightened") {
+                return;
+            }
+            const patrolState = patrol.mover.getState();
+            const distance = Math.abs(patrolState.row - playerState.row) + Math.abs(patrolState.column - playerState.column);
+            if (distance > 3) {
+                return;
+            }
+            const patrolCenter = worldToScreen(layout, patrolState.x, patrolState.y);
+            const alpha = clamp((4 - distance) / 4, 0.18, 0.72);
+            ctx.save();
+            ctx.globalAlpha = alpha * (0.72 + Math.sin(pulseTime * 10) * 0.18);
+            ctx.strokeStyle = "#ff7a90";
+            ctx.lineWidth = Math.max(2, layout.cellSize * 0.07);
+            ctx.setLineDash([Math.max(4, layout.cellSize * 0.24), Math.max(4, layout.cellSize * 0.18)]);
+            ctx.beginPath();
+            ctx.moveTo(playerCenter.x, playerCenter.y);
+            ctx.lineTo(patrolCenter.x, patrolCenter.y);
+            ctx.stroke();
+            ctx.restore();
+        });
+    }
+
     function drawReturningPatrolDrone(center, radius, state) {
         const direction = state.movingDirection || state.direction || "right";
         const vector = DIRECTIONS[direction] || DIRECTIONS.right;
@@ -840,8 +1094,202 @@ export async function mountGame(session, options = {}) {
         ctx.restore();
     }
 
+    function drawFeedbacks(layout) {
+        feedbacks.forEach((feedback) => {
+            const progress = clamp(feedback.age / feedback.duration, 0, 1);
+            const center = worldToScreen(layout, feedback.column + 0.5, feedback.row + 0.5);
+            ctx.save();
+            ctx.globalAlpha = 1 - progress;
+            ctx.fillStyle = feedback.color;
+            ctx.shadowColor = feedback.color;
+            ctx.shadowBlur = 16;
+            ctx.font = `900 ${Math.max(14, Math.floor(layout.cellSize * 0.82))}px Segoe UI, sans-serif`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(feedback.text, center.x, center.y - layout.cellSize * (0.2 + progress * 1.25));
+            ctx.restore();
+        });
+    }
+
+    function drawRouteTraces(layout) {
+        if (!routeTraces.length) {
+            return;
+        }
+        routeTraces.forEach((trace) => {
+            if (trace.age < 0) {
+                return;
+            }
+            const progress = clamp(trace.age / trace.duration, 0, 1);
+            const center = worldToScreen(layout, trace.column + 0.5, trace.row + 0.5);
+            const radius = layout.cellSize * (0.12 + progress * 0.42);
+            ctx.save();
+            ctx.globalCompositeOperation = "lighter";
+            ctx.globalAlpha = (1 - progress) * trace.alpha;
+            ctx.strokeStyle = "#54d3a5";
+            ctx.lineWidth = Math.max(2, layout.cellSize * 0.08);
+            ctx.shadowColor = "#54d3a5";
+            ctx.shadowBlur = Math.max(10, layout.cellSize * 0.6);
+            ctx.beginPath();
+            ctx.arc(center.x, center.y, radius, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+        });
+    }
+
+    function drawBanners(layout) {
+        banners.forEach((banner) => {
+            const progress = clamp(banner.age / banner.duration, 0, 1);
+            const fade = progress > 0.72 ? 1 - (progress - 0.72) / 0.28 : 1;
+            const scale = 0.9 + Math.sin(progress * Math.PI) * 0.12;
+            ctx.save();
+            ctx.globalAlpha = fade;
+            ctx.translate(layout.width / 2, layout.boardY + layout.boardHeight * 0.34);
+            ctx.scale(scale, scale);
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.shadowColor = banner.color;
+            ctx.shadowBlur = 24;
+            ctx.fillStyle = "#f8fbff";
+            ctx.font = `900 ${clamp(layout.width * 0.058, 28, 58)}px Segoe UI, sans-serif`;
+            ctx.fillText(banner.title, 0, 0);
+            ctx.shadowBlur = 12;
+            ctx.fillStyle = banner.color;
+            ctx.font = `800 ${clamp(layout.width * 0.026, 14, 24)}px Segoe UI, sans-serif`;
+            ctx.fillText(banner.detail, 0, clamp(layout.height * 0.052, 34, 48));
+            ctx.restore();
+        });
+    }
+
+    function drawBursts(layout) {
+        bursts.forEach((burst) => {
+            const progress = clamp(burst.age / burst.duration, 0, 1);
+            const center = worldToScreen(layout, burst.column + 0.5, burst.row + 0.5);
+            ctx.save();
+            ctx.globalCompositeOperation = "lighter";
+            burst.particles.forEach((particle) => {
+                const x = center.x + particle.dx * progress * layout.cellSize;
+                const y = center.y + particle.dy * progress * layout.cellSize + progress * progress * layout.cellSize * 0.35;
+                const size = Math.max(2, layout.cellSize * particle.size * (1 - progress * 0.35));
+                ctx.globalAlpha = (1 - progress) * particle.alpha;
+                ctx.fillStyle = burst.color;
+                ctx.shadowColor = burst.color;
+                ctx.shadowBlur = Math.max(6, layout.cellSize * 0.34);
+                ctx.fillRect(x - size / 2, y - size / 2, size, size);
+            });
+            ctx.restore();
+        });
+    }
+
+    function drawPowerAndLifeFlash(layout) {
+        if (powerTimer > 0) {
+            const powerAlpha = powerTimer < 2
+                ? 0.1 + Math.sin(pulseTime * 18) * 0.08
+                : 0.08;
+            ctx.save();
+            ctx.globalAlpha = Math.max(0, powerAlpha);
+            ctx.strokeStyle = "#ffd166";
+            ctx.lineWidth = Math.max(3, layout.cellSize * 0.14);
+            ctx.strokeRect(layout.boardX + 2, layout.boardY + 2, layout.boardWidth - 4, layout.boardHeight - 4);
+            ctx.restore();
+        }
+        if (lifeFlash > 0) {
+            ctx.save();
+            ctx.globalAlpha = Math.min(0.36, lifeFlash / 0.68 * 0.36);
+            ctx.fillStyle = "#ff4d6d";
+            ctx.fillRect(0, 0, layout.width, layout.height);
+            ctx.restore();
+        }
+    }
+
     function cellCenter(layout, cell) {
         return worldToScreen(layout, cell.column + 0.5, cell.row + 0.5);
+    }
+
+    function updateFeedback(delta) {
+        feedbacks = feedbacks
+            .map((feedback) => ({ ...feedback, age: feedback.age + delta }))
+            .filter((feedback) => feedback.age < feedback.duration);
+        banners = banners
+            .map((banner) => ({ ...banner, age: banner.age + delta }))
+            .filter((banner) => banner.age < banner.duration);
+        bursts = bursts
+            .map((burst) => ({ ...burst, age: burst.age + delta }))
+            .filter((burst) => burst.age < burst.duration);
+        routeTraces = routeTraces
+            .map((trace) => ({ ...trace, age: trace.age + delta }))
+            .filter((trace) => trace.age < trace.duration);
+        lifeFlash = Math.max(0, lifeFlash - delta);
+    }
+
+    function addFeedback(text, cell, color) {
+        feedbacks.push({
+            text,
+            row: cell.row,
+            column: cell.column,
+            color,
+            age: 0,
+            duration: 0.86,
+        });
+    }
+
+    function addBurst(cell, color, count) {
+        bursts.push({
+            row: cell.row,
+            column: cell.column,
+            color,
+            age: 0,
+            duration: 0.58,
+            particles: Array.from({ length: count }, () => {
+                const angle = Math.random() * Math.PI * 2;
+                const distance = 0.45 + Math.random() * 0.72;
+                return {
+                    dx: Math.cos(angle) * distance,
+                    dy: Math.sin(angle) * distance,
+                    size: 0.06 + Math.random() * 0.08,
+                    alpha: 0.58 + Math.random() * 0.38,
+                };
+            }),
+        });
+    }
+
+    function showBanner(title, detail, color = "#79d7ff", duration = 1) {
+        banners.push({ title, detail, color, age: 0, duration });
+    }
+
+    function checkRouteMilestone() {
+        const progress = getRouteProgress();
+        const nextIndex = ROUTE_MILESTONES.findIndex((milestone, index) => index > routeMilestoneIndex && progress >= milestone.progress);
+        if (nextIndex === -1) {
+            return;
+        }
+        routeMilestoneIndex = nextIndex;
+        const milestone = ROUTE_MILESTONES[nextIndex];
+        showBanner(milestone.title, milestone.detail, "#79d7ff", 1.05);
+        sound?.play?.("select", { volume: 0.42 });
+    }
+
+    function getRouteProgress() {
+        if (!totalSupplies) {
+            return 0;
+        }
+        const remaining = countSupplyMarkers();
+        return clamp((totalSupplies - remaining) / totalSupplies, 0, 1);
+    }
+
+    function countSupplyMarkers() {
+        return [...supplies.values()].filter((item) => item.type === "supply").length;
+    }
+
+    function createRouteTraces() {
+        return maze.collectibles
+            .filter((item) => item.type === "supply")
+            .map((item, index) => ({
+                row: item.row,
+                column: item.column,
+                age: -index * 0.012,
+                duration: 0.95,
+                alpha: 0.62,
+            }));
     }
 
     function worldToScreen(layout, x, y) {

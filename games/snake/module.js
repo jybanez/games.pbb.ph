@@ -212,7 +212,6 @@ export async function mountGame(session, options = {}) {
     }
 
     function syncScore() {
-        const nextLevel = getLevelByNumber(currentLevel.level + 1);
         ui.score.textContent = `Score ${score}  Lv ${currentLevel.level}`;
         options.onProgress?.({
             type: "progress:update",
@@ -226,8 +225,8 @@ export async function mountGame(session, options = {}) {
                 objective: "Collect supplies and keep the route clear",
                 score,
                 progressCurrent: foodCollected,
-                progressTarget: nextLevel.targetSupplies,
-                progressLabel: `Next level in ${Math.max(0, nextLevel.targetSupplies - foodCollected)} supplies`,
+                progressTarget: currentLevel.targetSupplies,
+                progressLabel: `Next level in ${Math.max(0, currentLevel.targetSupplies - foodCollected)} supplies`,
             },
         });
     }
