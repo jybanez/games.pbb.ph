@@ -372,8 +372,22 @@ export async function mountGame(session, options = {}) {
         ctx.fillRect(0, 0, bounds.width, bounds.height);
 
         ctx.save();
-        ctx.globalAlpha = 0.22;
-        ctx.strokeStyle = "#173056";
+        ctx.globalAlpha = 0.52;
+        ctx.strokeStyle = "rgba(84, 211, 165, .22)";
+        ctx.lineWidth = Math.max(1, Math.min(bounds.cellWidth, bounds.cellHeight) * 0.08);
+        roundRectPath(
+            bounds.cellWidth * 0.8,
+            bounds.cellHeight * 0.8,
+            bounds.width - bounds.cellWidth * 1.6,
+            bounds.height - bounds.cellHeight * 1.6,
+            Math.max(10, Math.min(bounds.cellWidth, bounds.cellHeight) * 0.55),
+        );
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.save();
+        ctx.globalAlpha = 0.36;
+        ctx.strokeStyle = "#214574";
         ctx.lineWidth = 1;
         const spacing = Math.max(24, Math.min(bounds.width, bounds.height) * 0.075);
         const drift = (pulseTime * 18) % spacing;
@@ -388,17 +402,17 @@ export async function mountGame(session, options = {}) {
 
     function drawRouteGrid() {
         ctx.save();
-        ctx.globalAlpha = 0.2;
-        ctx.strokeStyle = "#14213a";
+        ctx.globalAlpha = 0.3;
+        ctx.strokeStyle = "#1d3b65";
         ctx.lineWidth = 1;
-        for (let column = 4; column < bounds.columns; column += 4) {
+        for (let column = 2; column < bounds.columns; column += 2) {
             const x = column * bounds.cellWidth;
             ctx.beginPath();
             ctx.moveTo(x, 0);
             ctx.lineTo(x, bounds.height);
             ctx.stroke();
         }
-        for (let row = 4; row < bounds.rows; row += 4) {
+        for (let row = 2; row < bounds.rows; row += 2) {
             const y = row * bounds.cellHeight;
             ctx.beginPath();
             ctx.moveTo(0, y);
@@ -412,11 +426,11 @@ export async function mountGame(session, options = {}) {
         ctx.globalCompositeOperation = "lighter";
         ctx.globalAlpha = signalAlpha;
         ctx.fillStyle = "#54d3a5";
-        const signalCount = Math.max(4, Math.floor(bounds.columns / 5));
+        const signalCount = Math.max(8, Math.floor(bounds.columns / 3));
         for (let index = 0; index < signalCount; index += 1) {
             const column = (index * 5 + Math.floor(pulseTime * 1.4)) % bounds.columns;
             const row = (index * 7 + Math.floor(pulseTime * 0.9)) % bounds.rows;
-            const radius = Math.max(1.5, Math.min(bounds.cellWidth, bounds.cellHeight) * 0.07);
+            const radius = Math.max(2.2, Math.min(bounds.cellWidth, bounds.cellHeight) * 0.105);
             ctx.beginPath();
             ctx.arc((column + 0.5) * bounds.cellWidth, (row + 0.5) * bounds.cellHeight, radius, 0, Math.PI * 2);
             ctx.fill();
@@ -429,12 +443,12 @@ export async function mountGame(session, options = {}) {
         ctx.globalCompositeOperation = "lighter";
         snake.forEach((part, index) => {
             const progress = 1 - index / Math.max(1, snake.length);
-            const alpha = index === 0 ? 0.34 : Math.max(0.04, progress * 0.16);
-            const radius = Math.min(bounds.cellWidth, bounds.cellHeight) * (index === 0 ? 0.72 : 0.54);
+            const alpha = index === 0 ? 0.58 : Math.max(0.12, progress * 0.28);
+            const radius = Math.min(bounds.cellWidth, bounds.cellHeight) * (index === 0 ? 1.05 : 0.76);
             ctx.globalAlpha = alpha;
             ctx.fillStyle = index === 0 ? "#79d7ff" : "#54d3a5";
             ctx.shadowColor = ctx.fillStyle;
-            ctx.shadowBlur = Math.max(8, radius * 1.8);
+            ctx.shadowBlur = Math.max(14, radius * 2.4);
             ctx.beginPath();
             ctx.arc((part.x + 0.5) * bounds.cellWidth, (part.y + 0.5) * bounds.cellHeight, radius, 0, Math.PI * 2);
             ctx.fill();
@@ -446,21 +460,26 @@ export async function mountGame(session, options = {}) {
         snake.forEach((part, index) => {
             const x = part.x * bounds.cellWidth + 1;
             const y = part.y * bounds.cellHeight + 1;
-            const inset = index === 0 ? 0.8 : 1.4;
+            const inset = index === 0 ? 0.35 : 0.65;
             const width = bounds.cellWidth - 2 - inset * 2;
             const height = bounds.cellHeight - 2 - inset * 2;
-            const pulse = index === 0 ? 1 + Math.sin(pulseTime * 9) * 0.035 : 1;
+            const pulse = index === 0 ? 1 + Math.sin(pulseTime * 9) * 0.055 : 1;
             const cx = x + inset + width / 2;
             const cy = y + inset + height / 2;
             ctx.save();
             ctx.translate(cx, cy);
             ctx.scale(pulse, pulse);
-            ctx.fillStyle = index === 0 ? "#b7d7ff" : bodyColor(index);
-            ctx.shadowColor = index === 0 ? "rgba(121, 215, 255, .42)" : "rgba(84, 211, 165, .18)";
-            ctx.shadowBlur = index === 0 ? Math.max(5, bounds.cellWidth * 0.38) : Math.max(2, bounds.cellWidth * 0.12);
-            roundRectPath(-width / 2, -height / 2, width, height, Math.max(2, Math.min(width, height) * 0.24));
+            ctx.fillStyle = index === 0 ? "#c6e3ff" : bodyColor(index);
+            ctx.shadowColor = index === 0 ? "rgba(121, 215, 255, .72)" : "rgba(84, 211, 165, .34)";
+            ctx.shadowBlur = index === 0 ? Math.max(10, bounds.cellWidth * 0.66) : Math.max(4, bounds.cellWidth * 0.24);
+            roundRectPath(-width / 2, -height / 2, width, height, Math.max(4, Math.min(width, height) * 0.34));
             ctx.fill();
             ctx.shadowBlur = 0;
+            ctx.globalAlpha = 0.26;
+            ctx.fillStyle = "#ffffff";
+            roundRectPath(-width * 0.28, -height * 0.34, width * 0.56, height * 0.18, Math.max(2, height * 0.08));
+            ctx.fill();
+            ctx.globalAlpha = 1;
             if (index === 0) {
                 drawHeadEyes(width, height);
             } else if (index % 3 === 0) {
@@ -476,7 +495,7 @@ export async function mountGame(session, options = {}) {
 
     function bodyColor(index) {
         const blend = Math.min(1, index / Math.max(1, snake.length));
-        return blend > 0.66 ? "#5ec49e" : blend > 0.33 ? "#69bde2" : "#79a9ff";
+        return blend > 0.66 ? "#65ddb0" : blend > 0.33 ? "#77d2f2" : "#91b7ff";
     }
 
     function drawHeadEyes(width, height) {
@@ -495,18 +514,22 @@ export async function mountGame(session, options = {}) {
 
     function drawSupplies() {
         supplies.forEach((item) => {
-            const pulse = 1 + Math.sin(pulseTime * (item.type === "bonus" ? 9 : 6)) * (item.type === "bonus" ? 0.14 : 0.08);
+            const pulse = 1 + Math.sin(pulseTime * (item.type === "bonus" ? 9 : 6)) * (item.type === "bonus" ? 0.18 : 0.12);
             const centerX = (item.column + 0.5) * bounds.cellWidth;
             const centerY = (item.row + 0.5) * bounds.cellHeight;
-            const radius = Math.min(bounds.cellWidth, bounds.cellHeight) * (item.type === "bonus" ? 0.34 : 0.26) * pulse;
+            const radius = Math.min(bounds.cellWidth, bounds.cellHeight) * (item.type === "bonus" ? 0.46 : 0.34) * pulse;
             ctx.save();
             const ttlAlpha = item.ttl == null ? 1 : Math.max(0.38, Math.min(1, item.ttl / currentLevel.bonusTtl));
             ctx.fillStyle = item.type === "bonus" ? "#ffd166" : "#4fd29b";
             ctx.globalAlpha = item.type === "bonus" ? 0.94 : 0.86;
             ctx.shadowColor = item.type === "bonus" ? "#ffd166" : "#54d3a5";
-            ctx.shadowBlur = Math.max(6, radius * 1.1);
+            ctx.shadowBlur = Math.max(12, radius * 1.8);
             ctx.beginPath();
             ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = item.type === "bonus" ? 0.22 : 0.16;
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius * 2.45, 0, Math.PI * 2);
             ctx.fill();
             ctx.shadowBlur = 0;
             ctx.globalAlpha = ttlAlpha * 0.7;
