@@ -921,7 +921,7 @@ function createShell(session, game) {
 
     const score = document.createElement("p");
     score.className = "ui-badge pbb-game-session-score";
-    score.textContent = "Score 0  Lines 0  Lv 1";
+    score.textContent = "Score 0";
 
     const movementControls = document.createElement("div");
     movementControls.className = "pbb-game-session-movement-controls";
