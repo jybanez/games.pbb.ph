@@ -12,6 +12,13 @@ const LEVEL_DEFINITIONS = [
         energyEvery: 6.5,
         shieldEvery: 15,
         hazardChance: 0.28,
+        enemyMix: { drone: 0.68, weaver: 0.24, interceptor: 0.08 },
+        powerupEvery: 14,
+        segments: [
+            { id: "opening-run", from: 0, to: 10, pattern: "light" },
+            { id: "hazard-field", from: 10, to: 24, pattern: "hazards" },
+            { id: "exit-wave", from: 24, to: 44, pattern: "mixed" },
+        ],
         boss: null,
         clearBonus: 500,
         noDamageBonus: 750,
@@ -29,6 +36,13 @@ const LEVEL_DEFINITIONS = [
         energyEvery: 6,
         shieldEvery: 14,
         hazardChance: 0.38,
+        enemyMix: { drone: 0.44, weaver: 0.38, interceptor: 0.18 },
+        powerupEvery: 12,
+        segments: [
+            { id: "drift-entry", from: 0, to: 12, pattern: "weavers" },
+            { id: "signal-shear", from: 12, to: 33, pattern: "mixed" },
+            { id: "close-run", from: 33, to: 50, pattern: "interceptors" },
+        ],
         boss: null,
         clearBonus: 700,
         noDamageBonus: 750,
@@ -46,6 +60,13 @@ const LEVEL_DEFINITIONS = [
         energyEvery: 5.4,
         shieldEvery: 13,
         hazardChance: 0.45,
+        enemyMix: { drone: 0.34, weaver: 0.36, interceptor: 0.3 },
+        powerupEvery: 11,
+        segments: [
+            { id: "guardian-approach", from: 0, to: 16, pattern: "mixed" },
+            { id: "pressure-lane", from: 16, to: 37, pattern: "interceptors" },
+            { id: "guardian-stand", from: 37, to: 58, pattern: "guardian" },
+        ],
         boss: {
             appearAt: 37,
             health: 28,
@@ -56,6 +77,43 @@ const LEVEL_DEFINITIONS = [
         noDamageBonus: 900,
     },
 ];
+
+const ENEMY_TYPES = {
+    drone: {
+        health: 8,
+        score: 50,
+        speed: 1,
+        radiusScale: 1,
+        color: "#8f7cff",
+        core: "#ff8ea3",
+        drift: [4, 12],
+    },
+    weaver: {
+        health: 7,
+        score: 75,
+        speed: 1.08,
+        radiusScale: 0.95,
+        color: "#ff8bd1",
+        core: "#ffd1ec",
+        drift: [34, 56],
+        wave: [3.4, 5.2],
+    },
+    interceptor: {
+        health: 14,
+        score: 120,
+        speed: 1.18,
+        radiusScale: 1.08,
+        color: "#ffd166",
+        core: "#fff1b8",
+        drift: [10, 20],
+        trackStrength: 0.92,
+    },
+};
+
+const POWERUP_TYPES = {
+    spread: { label: "Spread", color: "#ffd166", duration: 7.5 },
+    overcharge: { label: "Overcharge", color: "#56d6ff", duration: 6.5 },
+};
 
 const PLAYER_RADIUS = 18;
 const PLAYER_MAX_ENERGY = 100;
@@ -85,8 +143,10 @@ export function mountGame(session, options = {}) {
     let spawnTimer = 0;
     let energyTimer = 0;
     let shieldTimer = 0;
+    let powerupTimer = 0;
     let bossFireTimer = 0;
     let bossSpawned = false;
+    let screenShake = 0;
     let score = 0;
     let damageTakenThisLevel = false;
     let paused = false;
@@ -99,6 +159,7 @@ export function mountGame(session, options = {}) {
     let enemyShots = [];
     let effects = [];
     let banners = [];
+    let activePowerups = createPowerupState();
 
     const joystick = createVirtualJoystick(ui.movementControls, {
         visibility: "ghost",
@@ -202,7 +263,10 @@ export function mountGame(session, options = {}) {
         spawnTimer -= delta;
         energyTimer -= delta;
         shieldTimer -= delta;
+        powerupTimer -= delta;
         bossFireTimer -= delta;
+        screenShake = Math.max(0, screenShake - delta);
+        updateActivePowerups(delta);
 
         updateStars(delta, level);
         updatePlayer(delta, level);
@@ -283,21 +347,32 @@ export function mountGame(session, options = {}) {
             shieldTimer = level.shieldEvery * (0.8 + Math.random() * 0.42);
             spawnPickup("shield");
         }
+        if (powerupTimer <= 0) {
+            powerupTimer = level.powerupEvery * (0.82 + Math.random() * 0.36);
+            if (Math.random() < 0.72) {
+                spawnPickup(Math.random() < 0.55 ? "spread" : "overcharge");
+            }
+        }
         if (level.boss && !bossSpawned && levelTime >= level.boss.appearAt && !enemies.some((enemy) => enemy.type === "guardian")) {
             bossSpawned = true;
             enemies.push(createGuardian(level));
             banners.push(createBanner("Route Guardian", "Hold the lane and finish the sector", "#ffd166", 1.6));
+            effects.push(createRoutePulse(metrics.width * 0.77, metrics.height * 0.5, "#ffd166", 1.35));
+            screenShake = Math.max(screenShake, 0.24);
             sound?.play?.("select", { volume: 0.52 });
         }
     }
 
     function updateProjectiles(delta, level) {
         projectiles.forEach((shot) => {
+            shot.prevX = shot.x;
+            shot.prevY = shot.y;
             shot.x += shot.vx * delta;
+            shot.y += shot.vy * delta;
             shot.life -= delta;
             shot.wobble += delta * 16;
         });
-        projectiles = projectiles.filter((shot) => shot.x < metrics.width + 80 && shot.life > 0);
+        projectiles = projectiles.filter((shot) => shot.x < metrics.width + 80 && shot.y > -60 && shot.y < metrics.height + 60 && shot.life > 0);
 
         if (level.boss && bossFireTimer <= 0) {
             const guardian = enemies.find((enemy) => enemy.type === "guardian");
@@ -334,12 +409,23 @@ export function mountGame(session, options = {}) {
                 const targetX = metrics.width * 0.79;
                 enemy.x += (targetX - enemy.x) * Math.min(1, delta * 1.9);
                 enemy.y += Math.sin(levelTime * 2.2) * level.boss.speed * delta;
+                enemy.phase += delta * 2.1;
+                if (Math.sin(enemy.phase) > 0.82) {
+                    enemy.y += Math.sign(player.y - enemy.y) * level.boss.speed * 0.3 * delta;
+                }
                 enemy.y = clamp(enemy.y, metrics.height * 0.18, metrics.height * 0.82);
                 enemy.hitFlash = Math.max(0, enemy.hitFlash - delta);
                 return;
             }
             enemy.x -= enemy.vx * delta;
-            enemy.y += Math.sin(levelTime * enemy.wave + enemy.phase) * enemy.drift * delta;
+            if (enemy.type === "weaver") {
+                enemy.y += Math.sin(levelTime * enemy.wave + enemy.phase) * enemy.drift * delta;
+            } else if (enemy.type === "interceptor") {
+                enemy.y += clamp(player.y - enemy.y, -enemy.drift, enemy.drift) * enemy.trackStrength * delta;
+            } else {
+                enemy.y += Math.sin(levelTime * enemy.wave + enemy.phase) * enemy.drift * delta;
+            }
+            enemy.y = clamp(enemy.y, enemy.radius + 6, metrics.height - enemy.radius - 6);
             enemy.hitFlash = Math.max(0, enemy.hitFlash - delta);
         });
         enemies = enemies.filter((enemy) => enemy.x > -90 && enemy.health > 0);
@@ -367,13 +453,17 @@ export function mountGame(session, options = {}) {
                 if (enemy.health > 0 && circlesOverlap(shot, enemy)) {
                     shot.life = 0;
                     enemy.health -= shot.damage;
-                    enemy.hitFlash = 0.11;
-                    effects.push(createBurst(shot.x, shot.y, enemy.type === "guardian" ? "#ffd166" : "#8ee7ff", 8));
+                    enemy.hitFlash = enemy.type === "guardian" ? 0.18 : 0.14;
+                    effects.push(createHitSpark(shot.x, shot.y, enemy.color || (enemy.type === "guardian" ? "#ffd166" : "#8ee7ff"), enemy.type === "guardian" ? 12 : 8));
                     if (enemy.health <= 0) {
-                        const value = enemy.type === "guardian" ? 600 : 50;
+                        const value = enemy.score || (enemy.type === "guardian" ? 600 : 50);
                         score += value;
-                        effects.push(createBurst(enemy.x, enemy.y, enemy.type === "guardian" ? "#ffd166" : "#7cf0c4", enemy.type === "guardian" ? 24 : 12));
-                        effects.push(createText(`+${value}`, enemy.x, enemy.y, "#f8fbff"));
+                        effects.push(createEnemyDestroy(enemy));
+                        effects.push(createScorePopup(`+${value}`, enemy.x, enemy.y, enemy.color || "#f8fbff"));
+                        if (enemy.type === "guardian") {
+                            effects.push(createRoutePulse(enemy.x, enemy.y, "#ffd166", 1.5));
+                            screenShake = Math.max(screenShake, 0.42);
+                        }
                         sound?.play?.("score", { volume: enemy.type === "guardian" ? 0.76 : 0.46 });
                     }
                 }
@@ -385,7 +475,7 @@ export function mountGame(session, options = {}) {
                     effects.push(createBurst(shot.x, shot.y, "#ff9fb1", 7));
                     if (hazard.health <= 0) {
                         score += 75;
-                        effects.push(createText("+75", hazard.x, hazard.y, "#ffd166"));
+                        effects.push(createScorePopup("+75", hazard.x, hazard.y, "#ffd166"));
                         sound?.play?.("score", { volume: 0.45 });
                     }
                 }
@@ -395,7 +485,7 @@ export function mountGame(session, options = {}) {
         hazards = hazards.filter((hazard) => hazard.health > 0);
         enemies = enemies.filter((enemy) => enemy.health > 0);
 
-        if (player.respawnTimer <= 0) {
+        if (player.respawnDelay <= 0 && player.respawnTimer <= 0) {
             enemies.forEach((enemy) => {
                 if (circlesOverlap(player, enemy)) {
                     damagePlayer(enemy.type === "guardian" ? 42 : 34, enemy.x, enemy.y);
@@ -426,11 +516,14 @@ export function mountGame(session, options = {}) {
                         player.energy = clamp(player.energy + 22, 0, PLAYER_MAX_ENERGY);
                         player.shield = clamp(player.shield + 8, 0, PLAYER_MAX_SHIELD);
                         effects.push(createText("+25 ENERGY", pickup.x, pickup.y, "#7cf0c4"));
-                    } else {
+                    } else if (pickup.type === "shield") {
                         player.shield = clamp(player.shield + 28, 0, PLAYER_MAX_SHIELD);
                         effects.push(createText("SHIELD", pickup.x, pickup.y, "#ffd166"));
+                    } else if (POWERUP_TYPES[pickup.type]) {
+                        activePowerups[pickup.type] = POWERUP_TYPES[pickup.type].duration;
+                        effects.push(createScorePopup(POWERUP_TYPES[pickup.type].label.toUpperCase(), pickup.x, pickup.y, POWERUP_TYPES[pickup.type].color, 1.15));
                     }
-                    effects.push(createBurst(pickup.x, pickup.y, pickup.type === "energy" ? "#7cf0c4" : "#ffd166", 11));
+                    effects.push(createBurst(pickup.x, pickup.y, pickupColor(pickup.type), 11));
                     sound?.play?.("score", { volume: 0.42 });
                 }
             });
@@ -446,7 +539,9 @@ export function mountGame(session, options = {}) {
         player.shield -= amount;
         player.invulnerable = 1.05;
         player.hitFlash = 0.28;
-        effects.push(createBurst(x, y, "#ff7a90", 16));
+        effects.push(createShieldImpact(player.x, player.y, player.shield > 0 ? "#7cf0c4" : "#ff7a90"));
+        effects.push(createHitSpark(x, y, "#ff7a90", 16));
+        screenShake = Math.max(screenShake, player.shield > 0 ? 0.14 : 0.26);
         sound?.play?.("error", { volume: 0.52 });
         if (player.shield > 0) {
             return;
@@ -474,20 +569,31 @@ export function mountGame(session, options = {}) {
     }
 
     function fire() {
-        if (done || paused || routeClearTimer > 0 || fireCooldown > 0 || player.energy < 8) {
+        const energyCost = activePowerups.overcharge > 0 ? 4 : 8;
+        if (done || paused || routeClearTimer > 0 || fireCooldown > 0 || player.energy < energyCost) {
             return;
         }
         const level = getLevel();
-        fireCooldown = level.fireCooldown;
-        player.energy = clamp(player.energy - 8, 0, PLAYER_MAX_ENERGY);
-        projectiles.push({
+        fireCooldown = activePowerups.overcharge > 0 ? level.fireCooldown * 0.72 : level.fireCooldown;
+        player.energy = clamp(player.energy - energyCost, 0, PLAYER_MAX_ENERGY);
+        const spread = activePowerups.spread > 0;
+        const shotOffsets = spread ? [-0.16, 0, 0.16] : [0];
+        shotOffsets.forEach((angle) => {
+            const speed = activePowerups.overcharge > 0 ? 620 : 540;
+            projectiles.push({
             x: player.x + player.radius * 0.85,
-            y: player.y - player.radius * 0.18,
-            vx: 540,
-            radius: 5,
-            damage: 4,
-            life: 1.8,
+                y: player.y - player.radius * 0.18,
+                prevX: player.x + player.radius * 0.85,
+                prevY: player.y - player.radius * 0.18,
+                vx: speed,
+                vy: Math.sin(angle) * speed,
+                radius: activePowerups.overcharge > 0 ? 6 : 5,
+                damage: activePowerups.overcharge > 0 ? 5 : 4,
+                life: 1.8,
+                color: activePowerups.overcharge > 0 ? "#56d6ff" : "#9cf5ff",
             wobble: 0,
+                overcharged: activePowerups.overcharge > 0,
+            });
         });
         sound?.play?.("move", { volume: 0.18 });
     }
@@ -504,9 +610,11 @@ export function mountGame(session, options = {}) {
         enemyShots = [];
         hazards = [];
         pickups = [];
-        effects.push(createText(`+${bonus} ROUTE CLEAR`, metrics.width * 0.5, metrics.height * 0.42, "#ffd166", 1.4));
-        banners.push(createBanner(`Level ${level.level} Clear`, damageTakenThisLevel ? "Next sector opening" : "No-damage bonus secured", "#ffd166", 1.55));
+        effects.push(createRouteClearWave(metrics.width * 0.5, metrics.height * 0.5));
+        effects.push(createScorePopup(`+${bonus} SECTOR CLEAR`, metrics.width * 0.5, metrics.height * 0.42, "#ffd166", 1.55));
+        banners.push(createBanner("Sector Clear", damageTakenThisLevel ? `Level ${level.level} complete` : `Level ${level.level} flawless bonus`, "#ffd166", 1.75));
         sound?.play?.("win", { volume: 0.62 });
+        screenShake = Math.max(screenShake, 0.34);
         syncHud();
     }
 
@@ -547,6 +655,7 @@ export function mountGame(session, options = {}) {
         enemyShots = [];
         effects = [];
         banners = [createBanner("Sector One", "Clear the route", "#56d6ff", 1.2)];
+        activePowerups = createPowerupState();
         paused = false;
         done = false;
         startLevel(0, { preservePlayer: true });
@@ -562,6 +671,7 @@ export function mountGame(session, options = {}) {
         spawnTimer = 0.8;
         energyTimer = 2.4;
         shieldTimer = 9;
+        powerupTimer = 7;
         bossFireTimer = 1.4;
         bossSpawned = false;
         damageTakenThisLevel = false;
@@ -570,6 +680,7 @@ export function mountGame(session, options = {}) {
         hazards = [];
         pickups = [];
         enemyShots = [];
+        activePowerups = createPowerupState();
         if (!options.preservePlayer) {
             player.x = metrics.width * 0.18;
             player.y = metrics.height * 0.5;
@@ -609,6 +720,11 @@ export function mountGame(session, options = {}) {
     function draw() {
         metrics = getMetrics();
         ctx.clearRect(0, 0, metrics.width, metrics.height);
+        ctx.save();
+        if (screenShake > 0) {
+            const intensity = Math.min(9, 34 * screenShake);
+            ctx.translate(randomBetween(-intensity, intensity), randomBetween(-intensity, intensity));
+        }
         drawBackdrop();
         drawStars();
         drawRouteRails();
@@ -621,6 +737,10 @@ export function mountGame(session, options = {}) {
         drawEffects();
         drawBanners();
         drawStatusBars();
+        drawRouteProgress();
+        drawGuardianHealth();
+        drawPowerupStatus();
+        ctx.restore();
     }
 
     function drawBackdrop() {
@@ -728,10 +848,18 @@ export function mountGame(session, options = {}) {
         ctx.globalCompositeOperation = "lighter";
         projectiles.forEach((shot) => {
             const y = shot.y + Math.sin(shot.wobble) * 1.4;
-            ctx.fillStyle = "#9cf5ff";
-            ctx.shadowColor = "#56d6ff";
-            ctx.shadowBlur = 12;
-            roundRectPath(shot.x - 3, y - 3, 24, 6, 3);
+            ctx.strokeStyle = shot.color || "#9cf5ff";
+            ctx.lineWidth = shot.overcharged ? 5 : 3;
+            ctx.globalAlpha = shot.overcharged ? 0.58 : 0.38;
+            ctx.beginPath();
+            ctx.moveTo((shot.prevX || shot.x) - 22, shot.prevY || y);
+            ctx.lineTo(shot.x + 4, y);
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = shot.color || "#9cf5ff";
+            ctx.shadowColor = shot.color || "#56d6ff";
+            ctx.shadowBlur = shot.overcharged ? 18 : 12;
+            roundRectPath(shot.x - 3, y - 3, shot.overcharged ? 30 : 24, shot.overcharged ? 7 : 6, 3);
             ctx.fill();
         });
         ctx.restore();
@@ -755,15 +883,40 @@ export function mountGame(session, options = {}) {
         enemies.forEach((enemy) => {
             ctx.save();
             ctx.translate(enemy.x, enemy.y);
-            ctx.shadowColor = enemy.hitFlash > 0 ? "#ffffff" : enemy.type === "guardian" ? "#ffd166" : "#b58cff";
+            ctx.shadowColor = enemy.hitFlash > 0 ? "#ffffff" : enemy.type === "guardian" ? "#ffd166" : enemy.color || "#b58cff";
             ctx.shadowBlur = enemy.type === "guardian" ? 26 : 14;
-            ctx.fillStyle = enemy.hitFlash > 0 ? "#ffffff" : enemy.type === "guardian" ? "#30213b" : "#2a2455";
+            ctx.fillStyle = enemy.hitFlash > 0 ? "#ffffff" : enemy.type === "guardian" ? "#30213b" : enemy.color || "#2a2455";
             if (enemy.type === "guardian") {
                 roundRectPath(-enemy.radius * 1.05, -enemy.radius * 1.25, enemy.radius * 2.1, enemy.radius * 2.5, enemy.radius * 0.32);
                 ctx.fill();
                 ctx.shadowBlur = 0;
                 ctx.fillStyle = "#ffd166";
                 ctx.fillRect(-enemy.radius * 0.65, -enemy.radius * 0.08, enemy.radius * 1.3, enemy.radius * 0.16);
+            } else if (enemy.type === "interceptor") {
+                ctx.rotate(Math.sin(levelTime * 4 + enemy.phase) * 0.12);
+                ctx.beginPath();
+                ctx.moveTo(-enemy.radius * 0.95, -enemy.radius);
+                ctx.lineTo(enemy.radius * 1.18, 0);
+                ctx.lineTo(-enemy.radius * 0.95, enemy.radius);
+                ctx.lineTo(-enemy.radius * 0.48, 0);
+                ctx.closePath();
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = enemy.core || "#fff1b8";
+                roundRectPath(-enemy.radius * 0.25, -enemy.radius * 0.18, enemy.radius * 0.58, enemy.radius * 0.36, enemy.radius * 0.16);
+                ctx.fill();
+            } else if (enemy.type === "weaver") {
+                ctx.rotate(Math.sin(levelTime * 5 + enemy.phase) * 0.26);
+                ctx.beginPath();
+                ctx.moveTo(-enemy.radius * 0.9, 0);
+                ctx.quadraticCurveTo(0, -enemy.radius * 1.05, enemy.radius * 1.05, 0);
+                ctx.quadraticCurveTo(0, enemy.radius * 1.05, -enemy.radius * 0.9, 0);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = enemy.core || "#ffd1ec";
+                ctx.beginPath();
+                ctx.arc(enemy.radius * 0.12, 0, enemy.radius * 0.22, 0, Math.PI * 2);
+                ctx.fill();
             } else {
                 ctx.rotate(Math.sin(levelTime * 3 + enemy.phase) * 0.18);
                 ctx.beginPath();
@@ -773,7 +926,7 @@ export function mountGame(session, options = {}) {
                 ctx.closePath();
                 ctx.fill();
                 ctx.shadowBlur = 0;
-                ctx.fillStyle = "#ff9fb1";
+                ctx.fillStyle = enemy.core || "#ff9fb1";
                 ctx.beginPath();
                 ctx.arc(-enemy.radius * 0.25, 0, enemy.radius * 0.22, 0, Math.PI * 2);
                 ctx.fill();
@@ -819,7 +972,7 @@ export function mountGame(session, options = {}) {
             ctx.translate(pickup.x, pickup.y);
             ctx.scale(pulse, pulse);
             ctx.globalCompositeOperation = "lighter";
-            ctx.fillStyle = pickup.type === "energy" ? "#7cf0c4" : "#ffd166";
+            ctx.fillStyle = pickupColor(pickup.type);
             ctx.shadowColor = ctx.fillStyle;
             ctx.shadowBlur = 16;
             roundRectPath(-pickup.radius, -pickup.radius, pickup.radius * 2, pickup.radius * 2, pickup.radius * 0.35);
@@ -830,9 +983,15 @@ export function mountGame(session, options = {}) {
             ctx.beginPath();
             ctx.moveTo(-pickup.radius * 0.45, 0);
             ctx.lineTo(pickup.radius * 0.45, 0);
-            if (pickup.type === "shield") {
+            if (pickup.type === "shield" || pickup.type === "spread") {
                 ctx.moveTo(0, -pickup.radius * 0.45);
                 ctx.lineTo(0, pickup.radius * 0.45);
+            }
+            if (pickup.type === "overcharge") {
+                ctx.moveTo(-pickup.radius * 0.28, pickup.radius * 0.44);
+                ctx.lineTo(pickup.radius * 0.18, -pickup.radius * 0.1);
+                ctx.lineTo(-pickup.radius * 0.05, -pickup.radius * 0.1);
+                ctx.lineTo(pickup.radius * 0.32, -pickup.radius * 0.44);
             }
             ctx.stroke();
             ctx.restore();
@@ -868,6 +1027,10 @@ export function mountGame(session, options = {}) {
                 drawPlayerExplosion(effect, progress);
             } else if (effect.type === "jumpArrival") {
                 drawJumpArrival(effect, progress);
+            } else if (effect.type === "shieldImpact") {
+                drawShieldImpact(effect, progress);
+            } else if (effect.type === "routeClearWave") {
+                drawRouteClearWave(effect, progress);
             } else {
                 ctx.globalAlpha = 1 - progress;
                 ctx.strokeStyle = effect.color;
@@ -1009,20 +1172,116 @@ export function mountGame(session, options = {}) {
         ctx.restore();
     }
 
+    function drawRouteProgress() {
+        const level = getLevel();
+        const progress = clamp(levelTime / level.durationSeconds, 0, 1);
+        const width = clamp(metrics.width * 0.18, 110, 190);
+        const height = 4;
+        const x = metrics.width / 2 - width / 2;
+        const y = clamp(metrics.height * 0.085, 34, 54);
+        ctx.save();
+        ctx.globalAlpha = 0.86;
+        ctx.fillStyle = "rgba(248, 251, 255, .12)";
+        roundRectPath(x, y, width, height, height / 2);
+        ctx.fill();
+        ctx.fillStyle = routeClearTimer > 0 ? "#ffd166" : "#8ee7ff";
+        roundRectPath(x, y, width * progress, height, height / 2);
+        ctx.fill();
+        ctx.fillStyle = "#b8d8ff";
+        ctx.font = `800 ${clamp(metrics.height * 0.024, 11, 14)}px Segoe UI, sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillText(`Route ${Math.round(progress * 100)}%`, x + width / 2, y + height + 5);
+        ctx.restore();
+    }
+
+    function drawGuardianHealth() {
+        const guardian = enemies.find((enemy) => enemy.type === "guardian");
+        if (!guardian) {
+            return;
+        }
+        const width = clamp(metrics.width * 0.22, 150, 260);
+        const height = 6;
+        const x = metrics.width / 2 - width / 2;
+        const y = clamp(metrics.height * 0.13, 52, 84);
+        const value = clamp(guardian.health / Math.max(1, guardian.maxHealth), 0, 1);
+        ctx.save();
+        ctx.fillStyle = "rgba(255, 209, 102, .16)";
+        roundRectPath(x, y, width, height, height / 2);
+        ctx.fill();
+        ctx.fillStyle = "#ffd166";
+        roundRectPath(x, y, width * value, height, height / 2);
+        ctx.fill();
+        ctx.restore();
+    }
+
+    function drawPowerupStatus() {
+        const active = Object.entries(activePowerups)
+            .filter(([, time]) => time > 0)
+            .map(([type, time]) => ({ type, time, definition: POWERUP_TYPES[type] }));
+        if (!active.length) {
+            return;
+        }
+        ctx.save();
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.font = `800 ${clamp(metrics.height * 0.026, 12, 15)}px Segoe UI, sans-serif`;
+        active.forEach((item, index) => {
+            const x = clamp(metrics.width * 0.03, 14, 32);
+            const y = clamp(metrics.height * 0.13, 52, 84) + index * 24;
+            const text = `${item.definition.label} ${Math.ceil(item.time)}s`;
+            const width = Math.max(96, ctx.measureText(text).width + 22);
+            ctx.fillStyle = "rgba(7, 16, 29, .66)";
+            roundRectPath(x, y - 11, width, 22, 11);
+            ctx.fill();
+            ctx.fillStyle = item.definition.color;
+            ctx.fillText(text, x + 11, y);
+        });
+        ctx.restore();
+    }
+
     function spawnEnemy(level) {
-        const radius = clamp(metrics.height * 0.028, 13, 22);
+        const type = chooseEnemyType(level);
+        const definition = ENEMY_TYPES[type] || ENEMY_TYPES.drone;
+        const radius = clamp(metrics.height * 0.028 * definition.radiusScale, 12, 24);
         enemies.push({
-            type: "drone",
+            type,
             x: metrics.width + radius * 2,
             y: randomBetween(metrics.height * 0.18, metrics.height * 0.82),
             radius,
-            vx: level.enemySpeed * randomBetween(0.86, 1.18),
-            health: 8,
+            vx: level.enemySpeed * definition.speed * randomBetween(0.86, 1.18),
+            health: definition.health,
+            maxHealth: definition.health,
+            score: definition.score,
+            color: definition.color,
+            core: definition.core,
             phase: Math.random() * Math.PI * 2,
-            wave: randomBetween(2.2, 4.4),
-            drift: randomBetween(16, 32),
+            wave: definition.wave ? randomBetween(definition.wave[0], definition.wave[1]) : randomBetween(2.2, 4.4),
+            drift: randomBetween(definition.drift[0], definition.drift[1]),
+            trackStrength: definition.trackStrength || 0,
             hitFlash: 0,
         });
+    }
+
+    function drawShieldImpact(effect, progress) {
+        ctx.globalAlpha = 1 - progress;
+        ctx.strokeStyle = effect.color;
+        ctx.lineWidth = Math.max(2, PLAYER_RADIUS * 0.14);
+        ctx.shadowColor = effect.color;
+        ctx.shadowBlur = 18;
+        ctx.beginPath();
+        ctx.arc(effect.x, effect.y, PLAYER_RADIUS * (1.35 + progress * 1.8), 0, Math.PI * 2);
+        ctx.stroke();
+    }
+
+    function drawRouteClearWave(effect, progress) {
+        const width = metrics.width * (0.12 + progress * 1.28);
+        ctx.globalAlpha = (1 - progress) * 0.72;
+        ctx.fillStyle = "#ffd166";
+        ctx.shadowColor = "#ffd166";
+        ctx.shadowBlur = 28;
+        roundRectPath(effect.x - width / 2, 0, width, metrics.height, Math.max(10, metrics.height * 0.08));
+        ctx.fill();
     }
 
     function spawnHazard(level) {
@@ -1043,7 +1302,7 @@ export function mountGame(session, options = {}) {
             type,
             x: metrics.width + 32,
             y: randomBetween(metrics.height * 0.22, metrics.height * 0.78),
-            radius: type === "energy" ? 10 : 12,
+            radius: POWERUP_TYPES[type] ? 13 : type === "energy" ? 10 : 12,
             pulse: Math.random() * Math.PI * 2,
         });
     }
@@ -1056,6 +1315,10 @@ export function mountGame(session, options = {}) {
             y: metrics.height * 0.5,
             radius,
             health: level.boss.health,
+            maxHealth: level.boss.health,
+            score: 600,
+            color: "#ffd166",
+            phase: 0,
             hitFlash: 0,
         };
     }
@@ -1077,6 +1340,39 @@ export function mountGame(session, options = {}) {
         banners = banners
             .map((banner) => ({ ...banner, age: banner.age + delta }))
             .filter((banner) => banner.age < banner.duration);
+    }
+
+    function updateActivePowerups(delta) {
+        Object.keys(activePowerups).forEach((key) => {
+            activePowerups[key] = Math.max(0, activePowerups[key] - delta);
+        });
+    }
+
+    function chooseEnemyType(level) {
+        const segment = getCurrentSegment(level);
+        if (segment?.pattern === "weavers") {
+            return Math.random() < 0.72 ? "weaver" : "drone";
+        }
+        if (segment?.pattern === "interceptors") {
+            return Math.random() < 0.66 ? "interceptor" : "weaver";
+        }
+        if (segment?.pattern === "hazards" && Math.random() < 0.35) {
+            return "weaver";
+        }
+        const mix = level.enemyMix || {};
+        const roll = Math.random();
+        let cursor = 0;
+        for (const type of ["drone", "weaver", "interceptor"]) {
+            cursor += mix[type] || 0;
+            if (roll <= cursor) {
+                return type;
+            }
+        }
+        return "drone";
+    }
+
+    function getCurrentSegment(level) {
+        return level.segments?.find((segment) => levelTime >= segment.from && levelTime < segment.to) || null;
     }
 
     function getInputVector() {
@@ -1272,6 +1568,50 @@ function createBurst(x, y, color, count = 12) {
             };
         }),
     };
+}
+
+function createHitSpark(x, y, color, count = 10) {
+    return {
+        ...createBurst(x, y, color, count),
+        duration: 0.28,
+    };
+}
+
+function createEnemyDestroy(enemy) {
+    return {
+        ...createBurst(enemy.x, enemy.y, enemy.color || "#7cf0c4", enemy.type === "guardian" ? 34 : enemy.type === "interceptor" ? 18 : 14),
+        duration: enemy.type === "guardian" ? 0.72 : 0.48,
+    };
+}
+
+function createScorePopup(text, x, y, color, duration = 0.95) {
+    return { type: "text", text, x, y, color, age: 0, duration };
+}
+
+function createShieldImpact(x, y, color) {
+    return { type: "shieldImpact", x, y, color, age: 0, duration: 0.42 };
+}
+
+function createRouteClearWave(x, y) {
+    return { type: "routeClearWave", x, y, age: 0, duration: 0.95 };
+}
+
+function createRoutePulse(x, y, color, duration = 0.8) {
+    return {
+        ...createBurst(x, y, color, 20),
+        duration,
+    };
+}
+
+function createPowerupState() {
+    return Object.fromEntries(Object.keys(POWERUP_TYPES).map((key) => [key, 0]));
+}
+
+function pickupColor(type) {
+    if (POWERUP_TYPES[type]) {
+        return POWERUP_TYPES[type].color;
+    }
+    return type === "energy" ? "#7cf0c4" : "#ffd166";
 }
 
 function createPlayerExplosion(x, y) {
