@@ -20,7 +20,7 @@ Before editing, check `git status`. If unrelated files are already modified, lea
 
 ## Branch Naming
 
-Use meaningful branch names with this shape for all task branches, regardless of whether they are created by Codex, another agent, or a human contributor:
+When a branch is needed, use meaningful branch names with this shape for all task branches, regardless of whether they are created by Codex, another agent, or a human contributor:
 
 ```text
 <category>/<task-name>
@@ -83,6 +83,29 @@ games-supply-run.pbb.ph
 games-helper-refresh.pbb.ph
 games-ui-search.pbb.ph
 ```
+
+## Docs Fast Lane
+
+Docs-only proposals, assessments, prompts, and agent handoff documents are coordination artifacts. They should be easy for other agents to discover from `main`.
+
+For docs-only work, agents may commit directly to latest `main` after confirming all of the following:
+
+- the worktree is clean
+- `main` is up to date
+- only files under `docs/` or repo-owned Codex skill documentation are changed
+- no runtime code, config, assets, vendored Helper bundles, or registry files are changed
+- Jonathan requested the document or the document is needed to unblock another agent
+
+Do not create a branch for ordinary docs-only proposals unless Jonathan asks for review first.
+
+Create a branch or PR for docs when:
+
+- the documentation is bundled with runtime/config/assets/registry changes
+- the change updates a formal operating protocol or module contract and Jonathan has not explicitly approved direct implementation
+- `main` is dirty, checked out elsewhere for active work, protected, or cannot be pushed directly
+- the content is intentionally controversial or needs review before becoming the source of truth
+
+When a separate worktree is needed only to avoid disturbing an active dirty checkout, a docs-only protocol update may still commit to `main` from that separate worktree as long as the changed files remain docs-only and the docs worktree is clean aside from the intended documentation changes.
 
 ## Task Isolation
 

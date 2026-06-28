@@ -24,7 +24,9 @@ Do not duplicate the full protocol here. Update this skill only when routing rul
 
 - Start every new Games task from latest `main`.
 - Check `git status` before editing.
-- Use branch names shaped as `<category>/<task-name>` for all task branches.
+- For ordinary docs-only proposals, assessments, prompts, and agent handoff documents, prefer direct commits to latest `main` after confirming the change is docs-only and `main` is clean.
+- Create a branch for docs only when Jonathan asks for review first, docs are bundled with runtime changes, the change affects a formal protocol/contract without prior approval, or `main` cannot be edited safely.
+- When a branch is needed, use branch names shaped as `<category>/<task-name>`.
 - Keep one task per branch.
 - Do not mix Helper vendor refreshes into unrelated game-only changes.
 - Do not patch Helper internals inside Games.
