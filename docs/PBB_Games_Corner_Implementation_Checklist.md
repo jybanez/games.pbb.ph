@@ -180,6 +180,7 @@
 - [x] Include acceptance test checklist.
 - [x] Create `docs/helper-ui-gap-proposals.md`.
 - [x] Create `docs/landing-registry.md`.
+- [x] Create `docs/helper-game-feedback-primitives-proposal.md`.
 - [x] Keep this proposal and checklist updated as scope changes.
 
 ## 10. Visual and UX Checks
