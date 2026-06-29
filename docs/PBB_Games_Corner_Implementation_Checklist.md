@@ -7,6 +7,15 @@
 - `[x]` Complete
 - `[!]` Blocked or needs decision
 
+## Current Snapshot
+
+- [x] App is on version `0.2.13`.
+- [x] `health.php` reports 11 registered games and 6 visible games in normal mode.
+- [x] Enabled visible games are Snake, Memory Cards, Breakout, Tetris, Supply Run, and Sector Wing.
+- [x] Disabled registry entries remain Emergency Kit Quiz, First Aid Matching, Hazard Awareness Quiz, Retro Corner, and Barangay Trivia.
+- [x] Sector Wing v2 is merged and available from `main`.
+- [x] Docs-only proposal/checklist updates may use the repo protocol docs fast lane on clean `main`.
+
 ## 1. Project Foundation
 
 - [x] Create root `index.php`.
@@ -86,10 +95,14 @@
 - [x] Implement Memory Cards at `games/memory/index.php`.
 - [x] Implement Breakout at `games/breakout/index.php`.
 - [x] Implement Tetris at `games/tetris/index.php`.
+- [x] Implement Supply Run at `games/pacman/index.php` with internal id/path `pacman`.
+- [x] Implement Sector Wing at `games/sector-wing/index.php`.
 - [x] Move Snake runtime into `games/snake/module.js`.
 - [x] Move Memory Cards runtime into `games/memory/module.js`.
 - [x] Move Breakout runtime into `games/breakout/module.js`.
 - [x] Implement Tetris runtime in `games/tetris/module.js`.
+- [x] Implement Supply Run runtime in `games/pacman/module.js`.
+- [x] Implement Sector Wing runtime in `games/sector-wing/module.js`.
 - [x] Keep direct game pages working through the same module contract.
 - [x] Add keyboard controls where useful.
 - [x] Add touch controls where useful.
@@ -100,10 +113,27 @@
 - [x] Remove Breakout joystick/D-pad and use direct touch/drag paddle control on small screens.
 - [x] Show Snake score and Breakout remaining-block count in the top-center HUD position.
 - [x] Use Helper `createTetromino` and mobile-first Helper controls for Tetris.
+- [x] Use Helper grid movement/pathing and central patrol base behavior for Supply Run.
+- [x] Keep Supply Run user-facing title while preserving internal id/path `pacman`.
+- [x] Add declarative mission levels, active-level tuning, route-clear transition, and level progression for Supply Run.
+- [x] Add Sector Wing side-scrolling route play, lives, shield, energy, enemy waves, guardian encounter, and route-clear flow.
 - [x] Add `Back to Games Corner` control on each game page.
 - [x] Add `Back to PBB Landing` control on each game page.
 - [x] Avoid sound by default.
 - [x] Avoid score persistence and analytics.
+
+## 5A. V2 Experience Upgrades
+
+- [x] Create and merge `docs/tetris-experience-v2-proposal.md`.
+- [x] Upgrade Tetris with right-side Next/Lines/Level layout, large score HUD, improved line-clear feedback, level-up effects, and game-over overlay cleanup.
+- [x] Create and merge `docs/snake-v2-upgrade-proposal.md`.
+- [x] Upgrade Snake with declarative levels, supply-based progression, compact `Score N Lv N` HUD, pickup effects, and level-up feedback.
+- [x] Create and merge `docs/supply-run-v2-upgrade-proposal.md`.
+- [x] Upgrade Supply Run with declarative mission levels, active-level tuning, HUD updates, and route-clear level progression.
+- [x] Create and merge `docs/sector-wing-v2-upgrade-proposal.md`.
+- [x] Upgrade Sector Wing with combat feedback, enemy archetypes, route progress, temporary power-ups, guardian health, and route-clear/game-over state flows.
+- [ ] Upgrade Memory Cards to v2 from `docs/memory-experience-v2-proposal.md`.
+- [ ] Upgrade Breakout to v2 from `docs/breakout-experience-v2-proposal.md`.
 
 ## 6. Learning Games
 
@@ -197,7 +227,7 @@
 - [x] Open `https://games.pbb.ph` and confirm homepage loads.
 - [ ] Open fallback path if configured: `https://pbb.ph/games`.
 - [x] Open each Quick Game and confirm it is playable.
-- [x] Open each Learning Game and confirm it is usable.
+- [x] Confirm disabled Learning Game registry entries stay hidden in the launcher until re-enabled.
 - [x] Confirm every game has navigation back to Games Corner and PBB Landing.
 - [x] Confirm README documents Helper UI usage and registry behavior.
 - [x] Confirm Landing registry metadata is documented.

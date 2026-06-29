@@ -14,6 +14,14 @@ It is not part of core emergency operations and does not call Hotline, Relay, Su
 - Database: not used
 - Internet: not required after installation
 
+## Current Status
+
+- App version: `0.2.13`
+- Registered games: 11
+- Visible enabled games in normal mode: 6
+- Current enabled game set: Snake, Memory Cards, Breakout, Tetris, Supply Run, and Sector Wing.
+- Currently disabled registry entries: Emergency Kit Quiz, First Aid Matching, Hazard Awareness Quiz, Retro Corner, and Barangay Trivia.
+
 ## Emergency Modes
 
 Mode is configured in `config/games.php`.
@@ -72,7 +80,7 @@ The app-owned launcher mark is published at `https://games.pbb.ph/assets/launche
 
 Module-backed games are launched from the registry. Games Center creates one active Helper `createGameSession`, requests fullscreen only on mobile browsers, applies the game orientation preference where supported, shows a Helper busy overlay while local assets and modules load, mounts the game module, then shows a standardized launch splash.
 
-Pressing `Start Game` removes the splash, shows a large `3, 2, 1` countdown over the game stage, then calls the game controller `start()` method. Game modules must not begin active gameplay during mount.
+Pressing the registry-provided start action removes the splash, shows a large `3, 2, 1` countdown over the game stage, then calls the game controller `start()` method. Game modules must not begin active gameplay during mount.
 
 Current game-specific notes:
 
@@ -80,6 +88,8 @@ Current game-specific notes:
 - Breakout uses a responsive canvas layout derived from the live stage size, top-center remaining-block count, keyboard control, and direct touch/drag paddle control. It intentionally does not show a D-pad or joystick.
 - Memory Cards uses the same game session and launch contract, does not require a forced orientation, and uses Helper `ui.game.objects` for canvas flip-card behavior while keeping deck, matching, scoring, and completion rules in Games Corner.
 - Tetris uses Helper `createTetromino` for SRS-aligned pieces and wall-kick candidates while Games Corner owns board collision, gravity, line clears, scoring, levels, and mobile-first touch controls.
+- Supply Run uses internal id/path `pacman`, user-facing title `Supply Run`, Helper grid movement/pathing, a central patrol base, declarative mission levels, route-clear progression, and portrait-first play.
+- Sector Wing uses internal id/path `sector-wing`, a landscape side-scrolling canvas loop, declarative route levels, combat feedback, enemy archetypes, temporary power-ups, guardian encounters, and mobile landscape controls.
 
 ## PWA Notes
 

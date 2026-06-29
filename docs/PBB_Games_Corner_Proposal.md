@@ -120,6 +120,36 @@ Placeholders:
 - Retro Corner, with legal warning and no ROMs.
 - Local / Barangay Games, disabled by default until local content exists.
 
+## Current Implementation Status
+
+As of app version `0.2.13`, the registry contains 11 games and `health.php` reports 6 visible games in normal mode.
+
+Current enabled game set:
+
+- Snake
+- Memory Cards
+- Breakout
+- Tetris
+- Supply Run, using internal id/path `pacman`
+- Sector Wing
+
+Current disabled registry entries:
+
+- Emergency Kit Quiz
+- First Aid Matching
+- Hazard Awareness Quiz
+- Retro Corner
+- Barangay Trivia
+
+The current post-v1 upgrade track is documented in:
+
+- `docs/tetris-experience-v2-proposal.md`
+- `docs/snake-v2-upgrade-proposal.md`
+- `docs/supply-run-v2-upgrade-proposal.md`
+- `docs/sector-wing-v2-upgrade-proposal.md`
+- `docs/memory-experience-v2-proposal.md`
+- `docs/breakout-experience-v2-proposal.md`
+
 ## Game Session and Launch Model
 
 Module-backed games should be launched through the registry and a single active Helper game session. The launcher creates the session overlay, requests fullscreen only on mobile browsers, applies the registry orientation preference where supported, shows a Helper busy overlay while local assets and modules load, mounts the game module, and then renders a standardized launch splash.

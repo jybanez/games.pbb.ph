@@ -1,5 +1,7 @@
 # Sector Wing V2 Upgrade Proposal
 
+Status: Implemented and merged in PR #11. Main includes the v2 pass in app version `0.2.13`.
+
 ## Summary
 
 Sector Wing V1 is playable and has the right foundation for an arcade side-scroller: fullscreen game session, splash/home flow, responsive canvas, joystick and fire controls, lives, shield, energy, projectiles, pickups, level definitions, route-clear flow, and a guardian encounter.
