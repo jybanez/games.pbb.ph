@@ -132,8 +132,10 @@
 - [x] Upgrade Supply Run with declarative mission levels, active-level tuning, HUD updates, and route-clear level progression.
 - [x] Create and merge `docs/sector-wing-v2-upgrade-proposal.md`.
 - [x] Upgrade Sector Wing with combat feedback, enemy archetypes, route progress, temporary power-ups, guardian health, and route-clear/game-over state flows.
+- [x] Create `docs/supply-shuffle-game-proposal.md`.
 - [ ] Upgrade Memory Cards to v2 from `docs/memory-experience-v2-proposal.md`.
 - [ ] Upgrade Breakout to v2 from `docs/breakout-experience-v2-proposal.md`.
+- [ ] Implement Supply Shuffle from `docs/supply-shuffle-game-proposal.md`.
 
 ## 6. Learning Games
 
