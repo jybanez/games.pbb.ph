@@ -835,9 +835,13 @@ export function mountGame(session, options = {}) {
     }
 
     function drawTileSymbol(symbol, size) {
-        const ink = "#07101d";
-        const light = "rgba(255, 255, 255, .34)";
+        const ink = "#f8fbff";
+        const shade = "rgba(7, 16, 29, .46)";
+        const light = "rgba(255, 255, 255, .58)";
         ctx.save();
+        ctx.shadowColor = shade;
+        ctx.shadowBlur = Math.max(3, size * 0.1);
+        ctx.shadowOffsetY = Math.max(1, size * 0.025);
         ctx.fillStyle = ink;
         ctx.strokeStyle = ink;
         ctx.lineWidth = Math.max(3, size * 0.085);
@@ -893,7 +897,7 @@ export function mountGame(session, options = {}) {
             ctx.lineTo(-size * 0.38, -size * 0.12);
             ctx.closePath();
             ctx.fill();
-            ctx.fillStyle = "rgba(255, 255, 255, .22)";
+            ctx.fillStyle = "rgba(86, 214, 255, .52)";
             roundRect(-size * 0.11, size * 0.06, size * 0.22, size * 0.34, size * 0.04);
             ctx.fill();
         } else if (symbol === "bowl") {
