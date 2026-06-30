@@ -9,9 +9,9 @@
 
 ## Current Snapshot
 
-- [x] App is on version `0.2.13`.
-- [x] `health.php` reports 11 registered games and 6 visible games in normal mode.
-- [x] Enabled visible games are Snake, Memory Cards, Breakout, Tetris, Supply Run, and Sector Wing.
+- [x] App is on version `0.2.14`.
+- [x] `health.php` reports 12 registered games and 7 visible games in normal mode.
+- [x] Enabled visible games are Snake, Memory Cards, Breakout, Tetris, Supply Run, Sector Wing, and Supply Shuffle.
 - [x] Disabled registry entries remain Emergency Kit Quiz, First Aid Matching, Hazard Awareness Quiz, Retro Corner, and Barangay Trivia.
 - [x] Sector Wing v2 is merged and available from `main`.
 - [x] Docs-only proposal/checklist updates may use the repo protocol docs fast lane on clean `main`.
@@ -135,7 +135,7 @@
 - [x] Create `docs/supply-shuffle-game-proposal.md`.
 - [ ] Upgrade Memory Cards to v2 from `docs/memory-experience-v2-proposal.md`.
 - [ ] Upgrade Breakout to v2 from `docs/breakout-experience-v2-proposal.md`.
-- [ ] Implement Supply Shuffle from `docs/supply-shuffle-game-proposal.md`.
+- [x] Implement Supply Shuffle from `docs/supply-shuffle-game-proposal.md`.
 
 ## 6. Learning Games
 
