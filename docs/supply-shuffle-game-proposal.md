@@ -1,16 +1,16 @@
-# Supply Shuffle Game Proposal
+# Survival Game Proposal
 
 ## Summary
 
-Add **Supply Shuffle** as a new PBB Games quick game. Supply Shuffle is an original match-3 puzzle game with a preparedness-supply skin: players swap adjacent tiles, create matches, trigger cascades, and complete level objectives using local, rights-safe assets.
+Add **Survival** as a new PBB Games quick game. Survival is an original match-3 puzzle game with a survival-resource skin: players swap adjacent tiles, create matches, trigger cascades, and complete level objectives using local, rights-safe assets.
 
 The game should use familiar match-3 principles as a genre reference, but it must not copy Bejeweled, Candy Crush, or any other branded board, visual language, sounds, effects, level maps, or special-tile names.
 
-Supply Shuffle is also the first good proof case for the newly vendored Helper `ui.game.effects` primitive. The match-3 rules remain Games-owned. Helper only assists with session/chrome/controls/audio primitives and non-rendering effect timing.
+Survival is also the first good proof case for the newly vendored Helper `ui.game.effects` primitive. The match-3 rules remain Games-owned. Helper only assists with session/chrome/controls/audio primitives and non-rendering effect timing.
 
 ## Product Fit
 
-Supply Shuffle fills a useful gap in the current quick-games roster:
+Survival fills a useful gap in the current quick-games roster:
 
 - It is familiar to casual players.
 - It works naturally on touch screens.
@@ -70,7 +70,7 @@ Suggested registry identity:
 
 ```php
 'id' => 'supply-shuffle',
-'title' => 'Supply Shuffle',
+'title' => 'Survival',
 'category' => 'quick',
 'subcategory' => 'puzzle',
 'path' => '/games/supply-shuffle/',
@@ -144,7 +144,7 @@ const LEVEL_DEFINITIONS = [
   {
     id: "level-1",
     level: 1,
-    title: "Supply Sort",
+    title: "Survival Goal",
     board: { columns: 7, rows: 7 },
     moves: 18,
     tileTypes: ["water", "medical", "power", "comms", "shelter"],
@@ -357,7 +357,7 @@ Use local Helper audio plumbing only. No remote sounds.
 
 ## Acceptance Criteria
 
-- Supply Shuffle appears in the launcher only if enabled in the registry.
+- Survival appears in the launcher only if enabled in the registry.
 - The game does not start automatically on launch.
 - The board fits mobile portrait without horizontal scrolling.
 - Direct tile interaction is comfortable on small screens.
@@ -371,4 +371,4 @@ Use local Helper audio plumbing only. No remote sounds.
 
 ## Recommendation
 
-Proceed with Supply Shuffle as a new app-owned quick game after the Helper game effects vendor refresh is merged. Keep v1 narrow: one polished match-3 loop, a small declarative level set, direct touch controls, and strong but simple effect feedback. Use the implementation to test whether `createGameEffectTimeline(...)` is sufficient before asking Helper for floating text, tween, or match-grid primitives.
+Proceed with Survival as a new app-owned quick game after the Helper game effects vendor refresh is merged. Keep v1 narrow: one polished match-3 loop, a small declarative level set, direct touch controls, and strong but simple effect feedback. Use the implementation to test whether `createGameEffectTimeline(...)` is sufficient before asking Helper for floating text, tween, or match-grid primitives.

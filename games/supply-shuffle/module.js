@@ -18,7 +18,7 @@ const LEVEL_DEFINITIONS = [
     {
         id: "supply-sort",
         level: 1,
-        title: "Supply Sort",
+        title: "Survival Goal",
         moves: 18,
         tileTypes: ["water", "medical", "power", "comms", "shelter"],
         objectives: [
@@ -89,7 +89,7 @@ export function mountGame(session, options = {}) {
         : createFallbackTimeline();
     const layer = session.addLayer({ id: "supply-shuffle-board", zIndex: 1, smoothing: true });
     const ctx = layer.context;
-    const ui = createShell(session, options.game || { title: "Supply Shuffle" });
+    const ui = createShell(session, options.game || { title: "Survival" });
     const sound = options.sound;
 
     let levelIndex = 0;
