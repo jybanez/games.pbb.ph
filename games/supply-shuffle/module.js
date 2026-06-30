@@ -814,19 +814,26 @@ export function mountGame(session, options = {}) {
         ctx.translate(x + size / 2 + invalidWobble, y + size / 2);
         ctx.scale(1 + pulse, 1 + pulse);
         ctx.shadowColor = definition.color;
-        ctx.shadowBlur = invalid ? 18 : Math.max(6, layout.cellSize * 0.22);
-        ctx.fillStyle = definition.color;
+        ctx.shadowBlur = invalid ? 18 : Math.max(4, layout.cellSize * 0.13);
+        const tileGradient = ctx.createLinearGradient(-size / 2, -size / 2, size / 2, size / 2);
+        tileGradient.addColorStop(0, hexToRgba(definition.color, 0.42));
+        tileGradient.addColorStop(0.48, "rgba(248, 251, 255, .15)");
+        tileGradient.addColorStop(1, hexToRgba(definition.color, 0.2));
+        ctx.fillStyle = tileGradient;
         roundRect(-size / 2, -size / 2, size, size, Math.max(7, size * 0.22));
         ctx.fill();
-
         ctx.shadowBlur = 0;
-        ctx.globalAlpha = 0.22;
+        ctx.strokeStyle = hexToRgba(definition.color, invalid ? 0.9 : 0.52);
+        ctx.lineWidth = Math.max(1.4, size * 0.035);
+        ctx.stroke();
+
+        ctx.globalAlpha = 0.28;
         ctx.fillStyle = "#ffffff";
         roundRect(-size * 0.38, -size * 0.39, size * 0.76, size * 0.2, Math.max(4, size * 0.1));
         ctx.fill();
         ctx.globalAlpha = 1;
 
-        drawTileSymbol(definition.symbol, size);
+        drawTileSymbol(definition.symbol, size, definition.color, definition.accent);
 
         if (tile.special) {
             drawSpecialMark(tile.special, size, definition.accent);
@@ -834,14 +841,13 @@ export function mountGame(session, options = {}) {
         ctx.restore();
     }
 
-    function drawTileSymbol(symbol, size) {
-        const ink = "#f8fbff";
-        const shade = "rgba(7, 16, 29, .46)";
-        const light = "rgba(255, 255, 255, .58)";
+    function drawTileSymbol(symbol, size, color, accent) {
+        const ink = color;
+        const shade = "rgba(248, 251, 255, .66)";
+        const light = accent || "rgba(255, 255, 255, .58)";
         ctx.save();
         ctx.shadowColor = shade;
-        ctx.shadowBlur = Math.max(3, size * 0.1);
-        ctx.shadowOffsetY = Math.max(1, size * 0.025);
+        ctx.shadowBlur = Math.max(4, size * 0.08);
         ctx.fillStyle = ink;
         ctx.strokeStyle = ink;
         ctx.lineWidth = Math.max(3, size * 0.085);
@@ -897,7 +903,7 @@ export function mountGame(session, options = {}) {
             ctx.lineTo(-size * 0.38, -size * 0.12);
             ctx.closePath();
             ctx.fill();
-            ctx.fillStyle = "rgba(86, 214, 255, .52)";
+            ctx.fillStyle = "rgba(248, 251, 255, .68)";
             roundRect(-size * 0.11, size * 0.06, size * 0.22, size * 0.34, size * 0.04);
             ctx.fill();
         } else if (symbol === "bowl") {
@@ -1292,6 +1298,14 @@ export function mountGame(session, options = {}) {
 
     function getTile(cell) {
         return isValidCell(cell) ? board[cell.row][cell.column] : null;
+    }
+
+    function hexToRgba(hex, alpha) {
+        const value = hex.replace("#", "");
+        const red = parseInt(value.slice(0, 2), 16);
+        const green = parseInt(value.slice(2, 4), 16);
+        const blue = parseInt(value.slice(4, 6), 16);
+        return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
     }
 
     function roundRect(x, y, width, height, radius) {
