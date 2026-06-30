@@ -719,6 +719,7 @@ export function mountGame(session, options = {}) {
     function draw() {
         const layout = getLayout();
         lastLayout = layout;
+        positionScoreBadge(layout);
         ctx.clearRect(0, 0, layout.width, layout.height);
         drawBackdrop(layout);
         drawBoardFrame(layout);
@@ -733,16 +734,43 @@ export function mountGame(session, options = {}) {
         const width = Math.max(260, layer.canvas.width || session.viewport.clientWidth || 390);
         const height = Math.max(360, layer.canvas.height || session.viewport.clientHeight || 720);
         const portrait = height >= width;
-        const topReserve = clamp(height * (portrait ? 0.15 : 0.12), 70, portrait ? 122 : 92);
-        const bottomReserve = clamp(height * (portrait ? 0.22 : 0.17), portrait ? 130 : 86, portrait ? 190 : 126);
         const sideMargin = clamp(width * 0.055, 14, 44);
+
+        if (!portrait) {
+            const topReserve = clamp(height * 0.18, 68, 92);
+            const bottomReserve = clamp(height * 0.045, 14, 28);
+            const panelGap = clamp(width * 0.028, 18, 32);
+            const panelWidth = clamp(width * 0.25, 180, 280);
+            const availableWidth = width - sideMargin * 2 - panelGap - panelWidth;
+            const availableHeight = height - topReserve - bottomReserve;
+            const boardSize = Math.floor(Math.max(190, Math.min(availableWidth, availableHeight)));
+            const totalWidth = boardSize + panelGap + panelWidth;
+            const boardX = Math.round(Math.max(sideMargin, (width - totalWidth) / 2));
+            const boardY = Math.round(topReserve + Math.max(0, (availableHeight - boardSize) * 0.5));
+            const cellSize = boardSize / BOARD_COLUMNS;
+            const panelX = Math.round(boardX + boardSize + panelGap);
+            const panelY = boardY;
+            const panelHeight = boardSize;
+            return { width, height, portrait, boardX, boardY, boardSize, cellSize, panelX, panelY, panelWidth, panelHeight };
+        }
+
+        const topReserve = clamp(height * 0.15, 70, 122);
+        const bottomReserve = clamp(height * 0.22, 130, 190);
         const availableWidth = width - sideMargin * 2;
         const availableHeight = height - topReserve - bottomReserve;
         const boardSize = Math.floor(Math.max(190, Math.min(availableWidth, availableHeight)));
         const boardX = Math.round((width - boardSize) / 2);
         const boardY = Math.round(topReserve + Math.max(0, (availableHeight - boardSize) * 0.45));
         const cellSize = boardSize / BOARD_COLUMNS;
-        return { width, height, portrait, boardX, boardY, boardSize, cellSize };
+        const panelY = boardY + boardSize + clamp(height * 0.028, 14, 24);
+        const panelHeight = clamp(height * 0.1, 64, 92);
+        const panelX = clamp(width * 0.06, 16, 42);
+        const panelWidth = width - panelX * 2;
+        return { width, height, portrait, boardX, boardY, boardSize, cellSize, panelX, panelY, panelWidth, panelHeight };
+    }
+
+    function positionScoreBadge(layout) {
+        ui.score.style.setProperty("top", `${layout.portrait ? 54 : 14}px`, "important");
     }
 
     function drawBackdrop(layout) {
@@ -1054,10 +1082,11 @@ export function mountGame(session, options = {}) {
     }
 
     function drawObjectives(layout) {
-        const panelY = layout.boardY + layout.boardSize + clamp(layout.height * 0.028, 14, 24);
-        const panelHeight = clamp(layout.height * 0.1, 64, 92);
-        const panelX = clamp(layout.width * 0.06, 16, 42);
-        const panelWidth = layout.width - panelX * 2;
+        const panelX = layout.panelX;
+        const panelY = layout.panelY;
+        const panelWidth = layout.panelWidth;
+        const panelHeight = layout.panelHeight;
+        const panelPadding = layout.portrait ? 14 : 12;
         ctx.save();
         ctx.fillStyle = "rgba(7, 16, 29, .58)";
         ctx.strokeStyle = "rgba(126, 155, 205, .22)";
@@ -1069,23 +1098,34 @@ export function mountGame(session, options = {}) {
         ctx.font = `800 ${clamp(layout.width * 0.032, 12, 15)}px Segoe UI, sans-serif`;
         ctx.textAlign = "left";
         ctx.textBaseline = "top";
-        ctx.fillText(level.title, panelX + 14, panelY + 10);
+        ctx.fillText(level.title, panelX + panelPadding, panelY + 10);
 
         const objectiveY = panelY + 34;
-        let x = panelX + 14;
+        let x = panelX + panelPadding;
+        let y = objectiveY;
+        const maxX = panelX + panelWidth - panelPadding;
+        const chipGap = layout.portrait ? 8 : 7;
+        const chipHeight = layout.portrait ? 28 : 27;
         level.objectives.forEach((objective) => {
             const label = objective.type === "score"
                 ? `Score ${Math.min(score, objective.value)}/${objective.value}`
                 : `${TILE_DEFINITIONS[objective.tile].label} ${Math.min(objective.count, collectProgress[objective.tile] || 0)}/${objective.count}`;
-            const textWidth = ctx.measureText(label).width + 20;
+            ctx.font = `800 ${clamp(layout.width * 0.03, 11, 14)}px Segoe UI, sans-serif`;
+            const textWidth = Math.min(ctx.measureText(label).width + 20, panelWidth - panelPadding * 2);
+            if (x > panelX + panelPadding && x + textWidth > maxX) {
+                x = panelX + panelPadding;
+                y += chipHeight + chipGap;
+            }
+            if (y + chipHeight > panelY + panelHeight - 10) {
+                return;
+            }
             const fill = objective.type === "score" ? "#ffd166" : TILE_DEFINITIONS[objective.tile].color;
             ctx.fillStyle = "rgba(248, 251, 255, .08)";
-            roundRect(x, objectiveY, textWidth, 28, 14);
+            roundRect(x, y, textWidth, chipHeight, 14);
             ctx.fill();
             ctx.fillStyle = fill;
-            ctx.font = `800 ${clamp(layout.width * 0.03, 11, 14)}px Segoe UI, sans-serif`;
-            ctx.fillText(label, x + 10, objectiveY + 7);
-            x += textWidth + 8;
+            ctx.fillText(label, x + 10, y + 7);
+            x += textWidth + chipGap;
         });
         ctx.restore();
     }
