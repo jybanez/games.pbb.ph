@@ -815,7 +815,7 @@ export function mountGame(session, options = {}) {
         ctx.scale(1 + pulse, 1 + pulse);
         ctx.shadowColor = definition.color;
         ctx.shadowBlur = invalid ? 18 : Math.max(3, layout.cellSize * 0.08);
-        ctx.fillStyle = mixHexToRgba(definition.color, "#07101d", 0.24, 0.94);
+        ctx.fillStyle = mixHexToRgba(definition.color, "#07101d", 0.12, 0.96);
         roundRect(-size / 2, -size / 2, size, size, Math.max(7, size * 0.22));
         ctx.fill();
         ctx.shadowBlur = 0;
