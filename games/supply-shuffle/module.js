@@ -814,24 +814,14 @@ export function mountGame(session, options = {}) {
         ctx.translate(x + size / 2 + invalidWobble, y + size / 2);
         ctx.scale(1 + pulse, 1 + pulse);
         ctx.shadowColor = definition.color;
-        ctx.shadowBlur = invalid ? 18 : Math.max(4, layout.cellSize * 0.13);
-        const tileGradient = ctx.createLinearGradient(-size / 2, -size / 2, size / 2, size / 2);
-        tileGradient.addColorStop(0, hexToRgba(definition.color, 0.42));
-        tileGradient.addColorStop(0.48, "rgba(248, 251, 255, .15)");
-        tileGradient.addColorStop(1, hexToRgba(definition.color, 0.2));
-        ctx.fillStyle = tileGradient;
+        ctx.shadowBlur = invalid ? 18 : Math.max(3, layout.cellSize * 0.09);
+        ctx.fillStyle = hexToRgba(definition.color, 0.28);
         roundRect(-size / 2, -size / 2, size, size, Math.max(7, size * 0.22));
         ctx.fill();
         ctx.shadowBlur = 0;
         ctx.strokeStyle = hexToRgba(definition.color, invalid ? 0.9 : 0.52);
         ctx.lineWidth = Math.max(1.4, size * 0.035);
         ctx.stroke();
-
-        ctx.globalAlpha = 0.28;
-        ctx.fillStyle = "#ffffff";
-        roundRect(-size * 0.38, -size * 0.39, size * 0.76, size * 0.2, Math.max(4, size * 0.1));
-        ctx.fill();
-        ctx.globalAlpha = 1;
 
         drawTileSymbol(definition.symbol, size * 0.82, definition.color, definition.accent);
 
