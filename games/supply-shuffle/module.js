@@ -823,7 +823,7 @@ export function mountGame(session, options = {}) {
         ctx.lineWidth = Math.max(1.4, size * 0.035);
         ctx.stroke();
 
-        drawTileSymbol(definition.symbol, size * 0.82, definition.color, definition.accent);
+        drawTileSymbol(definition.symbol, size * 0.62, definition.color, definition.accent);
 
         if (tile.special) {
             drawSpecialMark(tile.special, size, definition.accent);
@@ -845,6 +845,7 @@ export function mountGame(session, options = {}) {
         ctx.lineJoin = "round";
 
         if (symbol === "droplet") {
+            ctx.translate(0, -size * 0.08);
             ctx.beginPath();
             ctx.moveTo(0, -size * 0.3);
             ctx.bezierCurveTo(size * 0.24, -size * 0.06, size * 0.29, size * 0.1, size * 0.29, size * 0.2);
