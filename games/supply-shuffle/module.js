@@ -770,7 +770,7 @@ export function mountGame(session, options = {}) {
     }
 
     function positionScoreBadge(layout) {
-        ui.score.style.setProperty("top", `${layout.portrait ? 54 : 14}px`, "important");
+        ui.score.style.setProperty("top", `${layout.portrait ? 54 : 0}px`, "important");
     }
 
     function drawBackdrop(layout) {
