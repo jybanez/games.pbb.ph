@@ -763,7 +763,7 @@ export function mountGame(session, options = {}) {
         const boardY = Math.round(topReserve + Math.max(0, (availableHeight - boardSize) * 0.45));
         const cellSize = boardSize / BOARD_COLUMNS;
         const panelY = boardY + boardSize + clamp(height * 0.028, 14, 24);
-        const panelHeight = clamp(height * 0.1, 64, 92);
+        const panelHeight = clamp(height * 0.12, 78, 104);
         const panelX = clamp(width * 0.06, 16, 42);
         const panelWidth = width - panelX * 2;
         return { width, height, portrait, boardX, boardY, boardSize, cellSize, panelX, panelY, panelWidth, panelHeight };
@@ -1100,12 +1100,12 @@ export function mountGame(session, options = {}) {
         ctx.textBaseline = "top";
         ctx.fillText(level.title, panelX + panelPadding, panelY + 10);
 
-        const objectiveY = panelY + 34;
+        const objectiveY = panelY + (layout.portrait ? 33 : 34);
         let x = panelX + panelPadding;
         let y = objectiveY;
         const maxX = panelX + panelWidth - panelPadding;
         const chipGap = layout.portrait ? 8 : 7;
-        const chipHeight = layout.portrait ? 28 : 27;
+        const chipHeight = layout.portrait ? 26 : 27;
         level.objectives.forEach((objective) => {
             const label = objective.type === "score"
                 ? `Score ${Math.min(score, objective.value)}/${objective.value}`
@@ -1116,7 +1116,7 @@ export function mountGame(session, options = {}) {
                 x = panelX + panelPadding;
                 y += chipHeight + chipGap;
             }
-            if (y + chipHeight > panelY + panelHeight - 10) {
+            if (y + chipHeight > panelY + panelHeight - 8) {
                 return;
             }
             const fill = objective.type === "score" ? "#ffd166" : TILE_DEFINITIONS[objective.tile].color;
@@ -1124,7 +1124,7 @@ export function mountGame(session, options = {}) {
             roundRect(x, y, textWidth, chipHeight, 14);
             ctx.fill();
             ctx.fillStyle = fill;
-            ctx.fillText(label, x + 10, y + 7);
+            ctx.fillText(label, x + 10, y + (layout.portrait ? 6 : 7));
             x += textWidth + chipGap;
         });
         ctx.restore();
