@@ -6,12 +6,12 @@ const CLEAR_SECONDS = 0.24;
 const DROP_SECONDS = 0.24;
 
 const TILE_DEFINITIONS = {
-    water: { label: "Water", short: "W", color: "#56d6ff", accent: "#c9f4ff" },
-    medkit: { label: "Med Kit", short: "+", color: "#ff7a90", accent: "#ffd7df" },
-    radio: { label: "Radio", short: "R", color: "#b58cff", accent: "#eadcff" },
-    battery: { label: "Battery", short: "B", color: "#ffd166", accent: "#fff1b8" },
-    flashlight: { label: "Light", short: "L", color: "#7cf0c4", accent: "#dbfff1" },
-    shield: { label: "Shield", short: "S", color: "#79a9ff", accent: "#d9e7ff" },
+    water: { label: "Water", short: "Water", symbol: "droplet", color: "#56d6ff", accent: "#c9f4ff" },
+    medical: { label: "Medical", short: "Medical", symbol: "cross", color: "#68e6a2", accent: "#dfffea" },
+    power: { label: "Power", short: "Power", symbol: "bolt", color: "#ffd166", accent: "#fff1b8" },
+    comms: { label: "Comms", short: "Comms", symbol: "signal", color: "#b58cff", accent: "#eadcff" },
+    shelter: { label: "Shelter", short: "Shelter", symbol: "shelter", color: "#57d9e6", accent: "#d8fbff" },
+    food: { label: "Food", short: "Food", symbol: "bowl", color: "#ffad5f", accent: "#ffe0bd" },
 };
 
 const LEVEL_DEFINITIONS = [
@@ -20,7 +20,7 @@ const LEVEL_DEFINITIONS = [
         level: 1,
         title: "Supply Sort",
         moves: 18,
-        tileTypes: ["water", "medkit", "radio", "battery", "flashlight"],
+        tileTypes: ["water", "medical", "power", "comms", "shelter"],
         objectives: [
             { type: "collect", tile: "water", count: 10 },
             { type: "score", value: 600 },
@@ -32,10 +32,10 @@ const LEVEL_DEFINITIONS = [
         level: 2,
         title: "Kit Check",
         moves: 20,
-        tileTypes: ["water", "medkit", "radio", "battery", "flashlight"],
+        tileTypes: ["water", "medical", "power", "comms", "shelter"],
         objectives: [
-            { type: "collect", tile: "medkit", count: 8 },
-            { type: "collect", tile: "battery", count: 8 },
+            { type: "collect", tile: "medical", count: 8 },
+            { type: "collect", tile: "power", count: 8 },
             { type: "score", value: 950 },
         ],
         specialTiles: { lineClear: false, burst: false },
@@ -45,9 +45,9 @@ const LEVEL_DEFINITIONS = [
         level: 3,
         title: "Lane Clear",
         moves: 21,
-        tileTypes: ["water", "medkit", "radio", "battery", "flashlight", "shield"],
+        tileTypes: ["water", "medical", "power", "comms", "shelter", "food"],
         objectives: [
-            { type: "collect", tile: "radio", count: 10 },
+            { type: "collect", tile: "comms", count: 10 },
             { type: "score", value: 1300 },
         ],
         specialTiles: { lineClear: true, burst: false },
@@ -57,10 +57,10 @@ const LEVEL_DEFINITIONS = [
         level: 4,
         title: "Supply Burst",
         moves: 22,
-        tileTypes: ["water", "medkit", "radio", "battery", "flashlight", "shield"],
+        tileTypes: ["water", "medical", "power", "comms", "shelter", "food"],
         objectives: [
-            { type: "collect", tile: "flashlight", count: 10 },
-            { type: "collect", tile: "shield", count: 7 },
+            { type: "collect", tile: "shelter", count: 10 },
+            { type: "collect", tile: "food", count: 7 },
             { type: "score", value: 1700 },
         ],
         specialTiles: { lineClear: true, burst: true },
@@ -70,10 +70,10 @@ const LEVEL_DEFINITIONS = [
         level: 5,
         title: "Route Ready",
         moves: 24,
-        tileTypes: ["water", "medkit", "radio", "battery", "flashlight", "shield"],
+        tileTypes: ["water", "medical", "power", "comms", "shelter", "food"],
         objectives: [
             { type: "collect", tile: "water", count: 12 },
-            { type: "collect", tile: "radio", count: 10 },
+            { type: "collect", tile: "comms", count: 10 },
             { type: "score", value: 2200 },
         ],
         specialTiles: { lineClear: true, burst: true },
@@ -692,7 +692,7 @@ export function mountGame(session, options = {}) {
     function syncHud() {
         const collectText = level.objectives
             .filter((objective) => objective.type === "collect")
-            .map((objective) => `${TILE_DEFINITIONS[objective.tile].short} ${Math.min(objective.count, collectProgress[objective.tile] || 0)}/${objective.count}`)
+            .map((objective) => `${TILE_DEFINITIONS[objective.tile].label} ${Math.min(objective.count, collectProgress[objective.tile] || 0)}/${objective.count}`)
             .join("  ");
         const scoreObjective = level.objectives.find((objective) => objective.type === "score");
         const scoreText = scoreObjective ? `Target ${Math.min(scoreObjective.value, score)}/${scoreObjective.value}` : "";
@@ -826,11 +826,7 @@ export function mountGame(session, options = {}) {
         ctx.fill();
         ctx.globalAlpha = 1;
 
-        ctx.fillStyle = "#07101d";
-        ctx.font = `900 ${Math.max(16, Math.floor(size * 0.46))}px Segoe UI, sans-serif`;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        drawTileSymbol(definition.short, size);
+        drawTileSymbol(definition.symbol, size);
 
         if (tile.special) {
             drawSpecialMark(tile.special, size, definition.accent);
@@ -839,38 +835,119 @@ export function mountGame(session, options = {}) {
     }
 
     function drawTileSymbol(symbol, size) {
-        if (symbol === "+") {
-            ctx.lineWidth = Math.max(3, size * 0.09);
-            ctx.strokeStyle = "#07101d";
+        const ink = "#07101d";
+        const light = "rgba(255, 255, 255, .34)";
+        ctx.save();
+        ctx.fillStyle = ink;
+        ctx.strokeStyle = ink;
+        ctx.lineWidth = Math.max(3, size * 0.085);
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+
+        if (symbol === "droplet") {
             ctx.beginPath();
-            ctx.moveTo(-size * 0.2, 0);
-            ctx.lineTo(size * 0.2, 0);
-            ctx.moveTo(0, -size * 0.2);
-            ctx.lineTo(0, size * 0.2);
+            ctx.moveTo(0, -size * 0.3);
+            ctx.bezierCurveTo(size * 0.24, -size * 0.06, size * 0.29, size * 0.1, size * 0.29, size * 0.2);
+            ctx.bezierCurveTo(size * 0.29, size * 0.42, size * 0.12, size * 0.54, 0, size * 0.54);
+            ctx.bezierCurveTo(-size * 0.12, size * 0.54, -size * 0.29, size * 0.42, -size * 0.29, size * 0.2);
+            ctx.bezierCurveTo(-size * 0.29, size * 0.1, -size * 0.24, -size * 0.06, 0, -size * 0.3);
+            ctx.fill();
+            ctx.fillStyle = light;
+            ctx.beginPath();
+            ctx.ellipse(-size * 0.08, size * 0.08, size * 0.07, size * 0.13, -0.5, 0, Math.PI * 2);
+            ctx.fill();
+        } else if (symbol === "cross") {
+            const arm = size * 0.16;
+            const long = size * 0.43;
+            roundRect(-arm, -long, arm * 2, long * 2, arm * 0.34);
+            ctx.fill();
+            roundRect(-long, -arm, long * 2, arm * 2, arm * 0.34);
+            ctx.fill();
+        } else if (symbol === "bolt") {
+            ctx.beginPath();
+            ctx.moveTo(size * 0.08, -size * 0.45);
+            ctx.lineTo(-size * 0.26, size * 0.05);
+            ctx.lineTo(-size * 0.02, size * 0.05);
+            ctx.lineTo(-size * 0.12, size * 0.45);
+            ctx.lineTo(size * 0.28, -size * 0.12);
+            ctx.lineTo(size * 0.04, -size * 0.12);
+            ctx.closePath();
+            ctx.fill();
+        } else if (symbol === "signal") {
+            ctx.fillStyle = ink;
+            ctx.beginPath();
+            ctx.arc(0, size * 0.22, size * 0.08, 0, Math.PI * 2);
+            ctx.fill();
+            for (let index = 0; index < 3; index += 1) {
+                const radius = size * (0.18 + index * 0.15);
+                ctx.beginPath();
+                ctx.arc(0, size * 0.22, radius, Math.PI * 1.12, Math.PI * 1.88);
+                ctx.stroke();
+            }
+        } else if (symbol === "shelter") {
+            ctx.beginPath();
+            ctx.moveTo(0, -size * 0.44);
+            ctx.lineTo(size * 0.38, -size * 0.12);
+            ctx.lineTo(size * 0.3, size * 0.4);
+            ctx.lineTo(-size * 0.3, size * 0.4);
+            ctx.lineTo(-size * 0.38, -size * 0.12);
+            ctx.closePath();
+            ctx.fill();
+            ctx.fillStyle = "rgba(255, 255, 255, .22)";
+            roundRect(-size * 0.11, size * 0.06, size * 0.22, size * 0.34, size * 0.04);
+            ctx.fill();
+        } else if (symbol === "bowl") {
+            ctx.beginPath();
+            ctx.moveTo(-size * 0.38, -size * 0.04);
+            ctx.quadraticCurveTo(0, size * 0.5, size * 0.38, -size * 0.04);
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = ink;
+            ctx.lineWidth = Math.max(3, size * 0.075);
+            ctx.beginPath();
+            ctx.moveTo(-size * 0.32, -size * 0.08);
+            ctx.lineTo(size * 0.32, -size * 0.08);
             ctx.stroke();
-            return;
+            ctx.fillStyle = light;
+            ctx.beginPath();
+            ctx.arc(-size * 0.1, size * 0.12, size * 0.055, 0, Math.PI * 2);
+            ctx.arc(size * 0.09, size * 0.1, size * 0.045, 0, Math.PI * 2);
+            ctx.fill();
         }
-        ctx.fillText(symbol, 0, size * 0.02);
+        ctx.restore();
     }
 
     function drawSpecialMark(special, size, color) {
         ctx.save();
-        ctx.globalAlpha = 0.95;
+        const badgeX = size * 0.26;
+        const badgeY = size * 0.28;
+        const badgeSize = Math.max(13, size * 0.26);
+        ctx.globalAlpha = 0.98;
+        ctx.fillStyle = "rgba(7, 16, 29, .9)";
+        ctx.strokeStyle = color;
+        ctx.lineWidth = Math.max(1.5, size * 0.035);
+        roundRect(badgeX - badgeSize / 2, badgeY - badgeSize / 2, badgeSize, badgeSize, badgeSize * 0.25);
+        ctx.fill();
+        ctx.stroke();
         ctx.strokeStyle = color;
         ctx.fillStyle = color;
-        ctx.lineWidth = Math.max(2, size * 0.06);
+        ctx.lineWidth = Math.max(2, badgeSize * 0.16);
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
         if (special === "line") {
             ctx.beginPath();
-            ctx.moveTo(-size * 0.28, size * 0.31);
-            ctx.lineTo(size * 0.28, size * 0.31);
+            ctx.moveTo(badgeX - badgeSize * 0.26, badgeY - badgeSize * 0.12);
+            ctx.lineTo(badgeX + badgeSize * 0.26, badgeY - badgeSize * 0.12);
+            ctx.moveTo(badgeX - badgeSize * 0.26, badgeY + badgeSize * 0.12);
+            ctx.lineTo(badgeX + badgeSize * 0.26, badgeY + badgeSize * 0.12);
             ctx.stroke();
         } else {
             ctx.beginPath();
             for (let index = 0; index < 6; index += 1) {
                 const angle = -Math.PI / 2 + index * Math.PI / 3;
-                const radius = index % 2 === 0 ? size * 0.18 : size * 0.08;
-                const x = Math.cos(angle) * radius;
-                const y = Math.sin(angle) * radius + size * 0.31;
+                const radius = index % 2 === 0 ? badgeSize * 0.34 : badgeSize * 0.15;
+                const x = badgeX + Math.cos(angle) * radius;
+                const y = badgeY + Math.sin(angle) * radius;
                 if (index === 0) {
                     ctx.moveTo(x, y);
                 } else {
@@ -1089,7 +1166,7 @@ export function mountGame(session, options = {}) {
     function createGuaranteedBoard(currentLevel) {
         const types = currentLevel.tileTypes.length >= 5
             ? currentLevel.tileTypes
-            : ["water", "medkit", "radio", "battery", "flashlight"];
+            : ["water", "medical", "power", "comms", "shelter"];
         const result = Array.from({ length: BOARD_ROWS }, () => Array(BOARD_COLUMNS).fill(null));
         for (let row = 0; row < BOARD_ROWS; row += 1) {
             for (let column = 0; column < BOARD_COLUMNS; column += 1) {
@@ -1102,7 +1179,7 @@ export function mountGame(session, options = {}) {
 
     function seedGuaranteedMove(currentLevel, targetBoard = board) {
         const primary = currentLevel.tileTypes[0] || "water";
-        const secondary = currentLevel.tileTypes.find((type) => type !== primary) || "medkit";
+        const secondary = currentLevel.tileTypes.find((type) => type !== primary) || "medical";
         [
             { row: 0, column: 0, type: primary },
             { row: 0, column: 1, type: secondary },
@@ -1166,6 +1243,17 @@ export function mountGame(session, options = {}) {
                 done = true;
                 syncHud();
                 options.onStateChange?.("gameOver", { detail: `Score ${score}` });
+            },
+            forceSpecial: (special = "line") => {
+                const cell = { row: Math.floor(BOARD_ROWS / 2), column: Math.floor(BOARD_COLUMNS / 2) };
+                const tile = getTile(cell);
+                if (!tile) {
+                    return false;
+                }
+                tile.special = special === "burst" ? "burst" : "line";
+                tile.pulse = 0.4;
+                draw();
+                return true;
             },
         };
     }

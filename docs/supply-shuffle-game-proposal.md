@@ -109,16 +109,16 @@ Initial v1 rules:
 - Level completes when objective is met before moves run out.
 - Level fails when moves reach 0 before objective completion.
 
-Recommended first tile set:
+Recommended first tile language:
 
-- water
-- med kit
-- radio
-- battery
-- flashlight
-- shield
+- Water: blue droplet
+- Medical: green cross
+- Power: yellow lightning bolt
+- Comms: purple signal or radio wave
+- Shelter: cyan shield or house silhouette
+- Food: orange box or bowl
 
-Avoid using real PBB operational icons if the game treatment makes them too playful. Generated game-specific supply symbols are preferred.
+Tiles should not use detailed supply-object thumbnails. Use bold abstract symbols with simple geometry, a unique color, and a unique silhouette for each tile category. Each symbol must remain readable at roughly `32-48px` tile sizes on mobile. Avoid using real PBB operational icons if the game treatment makes them too playful. Generated game-specific abstract symbols are preferred.
 
 ## Scoring
 
@@ -147,7 +147,7 @@ const LEVEL_DEFINITIONS = [
     title: "Supply Sort",
     board: { columns: 7, rows: 7 },
     moves: 18,
-    tileTypes: ["water", "medkit", "radio", "battery", "flashlight"],
+    tileTypes: ["water", "medical", "power", "comms", "shelter"],
     objectives: [
       { type: "collect", tile: "water", count: 10 },
       { type: "score", value: 600 }
@@ -276,7 +276,7 @@ Draw order:
 6. selection outline or hint pulse
 7. overlay states
 
-Tiles should have clear silhouettes and color differences. Do not rely on color alone; include simple symbols.
+Tiles should have clear silhouettes and color differences. Do not rely on color alone; include simple abstract symbols. Avoid tiny text or initials as the primary tile identity, and do not use detailed literal item art that becomes unreadable on a small `7 x 7` mobile board.
 
 ## State Flow
 
