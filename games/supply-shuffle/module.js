@@ -833,7 +833,7 @@ export function mountGame(session, options = {}) {
         ctx.fill();
         ctx.globalAlpha = 1;
 
-        drawTileSymbol(definition.symbol, size, definition.color, definition.accent);
+        drawTileSymbol(definition.symbol, size * 0.82, definition.color, definition.accent);
 
         if (tile.special) {
             drawSpecialMark(tile.special, size, definition.accent);
