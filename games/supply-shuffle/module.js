@@ -108,10 +108,15 @@ export function mountGame(session, options = {}) {
     let invalidSwap = null;
     let lastLayout = null;
     let inputActive = false;
+    let runToken = 0;
+    let destroyed = false;
 
     const loop = createGameLoop({
         autoStart: false,
         update({ delta }) {
+            if (paused) {
+                return;
+            }
             pulseTime += delta;
             effects.update(delta * 1000);
             updateTileAnimation(delta);
@@ -143,6 +148,8 @@ export function mountGame(session, options = {}) {
             loop.start();
         },
         destroy() {
+            destroyed = true;
+            advanceRunToken();
             loop.stop();
             effects.destroy?.();
             resizeObserver?.disconnect();
@@ -172,6 +179,7 @@ export function mountGame(session, options = {}) {
         },
         restart() {
             inputActive = true;
+            advanceRunToken();
             reset();
         },
     };
@@ -183,6 +191,7 @@ export function mountGame(session, options = {}) {
     }
 
     function startLevel(nextLevelIndex, { keepScore = true, announce = true } = {}) {
+        advanceRunToken();
         levelIndex = Math.min(nextLevelIndex, LEVEL_DEFINITIONS.length - 1);
         level = LEVEL_DEFINITIONS[levelIndex];
         if (!keepScore) {
@@ -201,15 +210,50 @@ export function mountGame(session, options = {}) {
             : null;
         effects.clear();
         board = createInitialBoard(level);
-        for (let attempt = 0; attempt < 8 && !findValidSwap(); attempt += 1) {
-            board = createInitialBoard(level);
-        }
-        if (!findValidSwap()) {
-            seedGuaranteedMove(level);
-        }
+        ensurePlayableBoard();
         options.onStateChange?.("playing");
         syncHud();
         draw();
+    }
+
+    function advanceRunToken() {
+        runToken += 1;
+        return runToken;
+    }
+
+    function isRunCurrent(token) {
+        return !destroyed && token === runToken;
+    }
+
+    function delayWhileActive(seconds, token) {
+        const targetMs = Math.max(0, seconds * 1000);
+        if (!isRunCurrent(token)) {
+            return Promise.resolve(false);
+        }
+        if (targetMs === 0) {
+            return Promise.resolve(true);
+        }
+        return new Promise((resolve) => {
+            let elapsed = 0;
+            let last = performance.now();
+            const step = () => {
+                if (!isRunCurrent(token)) {
+                    resolve(false);
+                    return;
+                }
+                const now = performance.now();
+                if (!paused) {
+                    elapsed += now - last;
+                }
+                last = now;
+                if (elapsed >= targetMs) {
+                    resolve(isRunCurrent(token));
+                    return;
+                }
+                window.setTimeout(step, 32);
+            };
+            window.setTimeout(step, 32);
+        });
     }
 
     function handlePointerDown(event) {
@@ -288,12 +332,15 @@ export function mountGame(session, options = {}) {
             return false;
         }
 
+        const token = runToken;
         selected = null;
         resolving = true;
         swapTiles(a, b);
         markTilesForSwap(a, b);
         effects.spawn({ type: "swap", duration: MATCH_SETTLE_SECONDS * 1000, payload: { cells: [a, b] } });
-        await wait(MATCH_SETTLE_SECONDS);
+        if (!await delayWhileActive(MATCH_SETTLE_SECONDS, token)) {
+            return false;
+        }
 
         const activated = getActivatedSpecialCells(a, b);
         const groups = findMatches();
@@ -302,7 +349,9 @@ export function mountGame(session, options = {}) {
             markTilesForSwap(a, b);
             invalidSwap = { cells: [a, b], age: 0, duration: 0.36 };
             sound?.play?.("error", { volume: 0.34 });
-            await wait(0.22);
+            if (!await delayWhileActive(0.22, token)) {
+                return false;
+            }
             resolving = false;
             draw();
             return false;
@@ -310,19 +359,24 @@ export function mountGame(session, options = {}) {
 
         moves = Math.max(0, moves - 1);
         sound?.play?.("move", { volume: 0.36 });
-        await resolveBoard({ initialGroups: groups, activated });
+        if (!await resolveBoard({ initialGroups: groups, activated, token })) {
+            return false;
+        }
         resolving = false;
+        if (!findValidSwap() && moves > 0 && !objectivesMet()) {
+            repairPlayableBoard();
+        }
         checkLevelState();
         syncHud();
         draw();
         return true;
     }
 
-    async function resolveBoard({ initialGroups = null, activated = [] } = {}) {
+    async function resolveBoard({ initialGroups = null, activated = [], token = runToken } = {}) {
         let cascade = 1;
         let groups = initialGroups || findMatches();
         let activeSpecials = activated;
-        while ((groups.length || activeSpecials.length) && !done) {
+        while ((groups.length || activeSpecials.length) && !done && isRunCurrent(token)) {
             const clearResult = buildClearSet(groups, activeSpecials);
             const specialPlan = chooseSpecialCreation(groups, clearResult.cells);
             const award = scoreClear(clearResult.cells.size, cascade);
@@ -330,15 +384,20 @@ export function mountGame(session, options = {}) {
             updateObjectives(clearResult.cells);
             spawnClearEffects(clearResult.cells, award, cascade, clearResult.color);
             sound?.play?.("score", { volume: Math.min(0.72, 0.34 + cascade * 0.08) });
-            await wait(CLEAR_SECONDS);
+            if (!await delayWhileActive(CLEAR_SECONDS, token)) {
+                return false;
+            }
             clearCells(clearResult.cells, specialPlan);
             applyGravity();
             syncHud();
-            await wait(DROP_SECONDS);
+            if (!await delayWhileActive(DROP_SECONDS, token)) {
+                return false;
+            }
             cascade += 1;
             groups = findMatches();
             activeSpecials = [];
         }
+        return isRunCurrent(token);
     }
 
     function buildClearSet(groups, activeSpecials = []) {
@@ -466,7 +525,8 @@ export function mountGame(session, options = {}) {
         }
     }
 
-    function completeLevel() {
+    async function completeLevel() {
+        const token = runToken;
         const bonus = moves * 35 + level.level * 100;
         score += bonus;
         syncHud();
@@ -479,11 +539,12 @@ export function mountGame(session, options = {}) {
             return;
         }
         resolving = true;
-        window.setTimeout(() => {
-            if (!done) {
-                startLevel(levelIndex + 1, { keepScore: true, announce: true });
-            }
-        }, 1300);
+        if (!await delayWhileActive(1.3, token)) {
+            return;
+        }
+        if (!done && isRunCurrent(token)) {
+            startLevel(levelIndex + 1, { keepScore: true, announce: true });
+        }
     }
 
     function objectivesMet() {
@@ -1005,7 +1066,41 @@ export function mountGame(session, options = {}) {
         return result;
     }
 
-    function seedGuaranteedMove(currentLevel) {
+    function ensurePlayableBoard() {
+        for (let attempt = 0; attempt < 16; attempt += 1) {
+            if (!findMatches().length && findValidSwap()) {
+                return;
+            }
+            board = createInitialBoard(level);
+        }
+        board = createGuaranteedBoard(level);
+    }
+
+    function repairPlayableBoard() {
+        board = createInitialBoard(level);
+        ensurePlayableBoard();
+        selected = null;
+        invalidSwap = null;
+        statusBanner = createBanner("Reshuffle", "New supply route", "#79d7ff", 0.95);
+        effects.spawn({ type: "levelClear", duration: 620, payload: { bonus: 0 } });
+        draw();
+    }
+
+    function createGuaranteedBoard(currentLevel) {
+        const types = currentLevel.tileTypes.length >= 5
+            ? currentLevel.tileTypes
+            : ["water", "medkit", "radio", "battery", "flashlight"];
+        const result = Array.from({ length: BOARD_ROWS }, () => Array(BOARD_COLUMNS).fill(null));
+        for (let row = 0; row < BOARD_ROWS; row += 1) {
+            for (let column = 0; column < BOARD_COLUMNS; column += 1) {
+                result[row][column] = createTile(types[(row * 2 + column * 3) % types.length], row, column);
+            }
+        }
+        seedGuaranteedMove(currentLevel, result);
+        return result;
+    }
+
+    function seedGuaranteedMove(currentLevel, targetBoard = board) {
         const primary = currentLevel.tileTypes[0] || "water";
         const secondary = currentLevel.tileTypes.find((type) => type !== primary) || "medkit";
         [
@@ -1014,7 +1109,7 @@ export function mountGame(session, options = {}) {
             { row: 0, column: 2, type: primary },
             { row: 1, column: 1, type: primary },
         ].forEach((cell) => {
-            board[cell.row][cell.column] = createTile(cell.type, cell.row, cell.column);
+            targetBoard[cell.row][cell.column] = createTile(cell.type, cell.row, cell.column);
         });
     }
 
@@ -1196,10 +1291,6 @@ function cellCenter(layout, cell) {
 
 function createBanner(title, detail, color, duration) {
     return { title, detail, color, duration, age: 0 };
-}
-
-function wait(seconds) {
-    return new Promise((resolve) => window.setTimeout(resolve, seconds * 1000));
 }
 
 function clamp(value, min, max) {
