@@ -814,8 +814,8 @@ export function mountGame(session, options = {}) {
         ctx.translate(x + size / 2 + invalidWobble, y + size / 2);
         ctx.scale(1 + pulse, 1 + pulse);
         ctx.shadowColor = definition.color;
-        ctx.shadowBlur = invalid ? 18 : Math.max(3, layout.cellSize * 0.09);
-        ctx.fillStyle = hexToRgba(definition.color, 0.28);
+        ctx.shadowBlur = invalid ? 18 : Math.max(3, layout.cellSize * 0.08);
+        ctx.fillStyle = mixHexToRgba(definition.color, "#07101d", 0.24, 0.94);
         roundRect(-size / 2, -size / 2, size, size, Math.max(7, size * 0.22));
         ctx.fill();
         ctx.shadowBlur = 0;
@@ -1295,6 +1295,15 @@ export function mountGame(session, options = {}) {
         const red = parseInt(value.slice(0, 2), 16);
         const green = parseInt(value.slice(2, 4), 16);
         const blue = parseInt(value.slice(4, 6), 16);
+        return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+    }
+
+    function mixHexToRgba(hex, baseHex, amount, alpha) {
+        const color = hex.replace("#", "");
+        const base = baseHex.replace("#", "");
+        const red = Math.round(parseInt(color.slice(0, 2), 16) * amount + parseInt(base.slice(0, 2), 16) * (1 - amount));
+        const green = Math.round(parseInt(color.slice(2, 4), 16) * amount + parseInt(base.slice(2, 4), 16) * (1 - amount));
+        const blue = Math.round(parseInt(color.slice(4, 6), 16) * amount + parseInt(base.slice(4, 6), 16) * (1 - amount));
         return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
     }
 
